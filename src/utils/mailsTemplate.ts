@@ -1,4 +1,5 @@
-import { sendEmail } from "./sendMail";
+import sendMail from "./sendMail";
+
 
 export interface ReceiptMailData {
   email: string;
@@ -209,10 +210,12 @@ export const buildReceiptHtml = (data: ReceiptMailData): string => {
 export const sendReceiptEmail = async (data: ReceiptMailData): Promise<void> => {
   const html = buildReceiptHtml(data);
 
-  await sendEmail({
-    email: data.email,
+  await sendMail({
+    // Changed 'email' to 'to'
+    to: data.email,
     subject: `Payment Receipt — ${data.receipt_number}`,
-    message: `Hi ${data.parent_name}, your payment of KES ${data.amount} for ${data.kid_name} (${data.course_name}) has been received. Receipt No: ${data.receipt_number}.`,
+    // Changed 'message' to 'text'
+    text: `Hi ${data.parent_name}, your payment of KES ${data.amount} for ${data.kid_name} (${data.course_name}) has been received. Receipt No: ${data.receipt_number}.`,
     html,
   });
 };

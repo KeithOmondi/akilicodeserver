@@ -1,6 +1,6 @@
 import pool from '../config/db';
-import { sendEmail } from './sendMail';
 import { buildPaymentReminderHtml } from './mailsTemplate';
+import sendMail from './sendMail';
 
 export const sendPaymentReminders = async () => {
   try {
@@ -21,10 +21,11 @@ export const sendPaymentReminders = async () => {
     );
 
     for (const enrollment of result.rows) {
-      await sendEmail({
-        email: enrollment.parent_email,
+      // FIX: Changed 'email' to 'to' and 'message' to 'text' to match SendMailOptions
+      await sendMail({
+        to: enrollment.parent_email, 
         subject: `Payment Reminder — ${enrollment.course_name} due in 7 days`,
-        message: `Hi ${enrollment.parent_name}, your payment of KES ${enrollment.fee_amount} for ${enrollment.kid_name} (${enrollment.course_name}) is due on ${enrollment.next_payment_date}.`,
+        text: `Hi ${enrollment.parent_name}, your payment of KES ${enrollment.fee_amount} for ${enrollment.kid_name} (${enrollment.course_name}) is due on ${enrollment.next_payment_date}.`,
         html: buildPaymentReminderHtml({
           parent_name: enrollment.parent_name,
           kid_name: enrollment.kid_name,

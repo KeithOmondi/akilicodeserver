@@ -6,9 +6,9 @@ import env from '../config/env';
 import { sendToken } from '../utils/sendToken';
 import { AppError } from '../utils/appError';
 import { IJWTPayload } from '../interfaces/user.interface';
-import { sendEmail } from '../utils/sendMail';
 import { buildResetPasswordLinkHtml, buildVerificationLinkHtml } from '../utils/mailsTemplate';
 import crypto from 'crypto';
+import sendMail from '../utils/sendMail';
 
 /**
  * REGISTER
@@ -50,14 +50,13 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     );
 
     // 6. Construct Verification URL
-    // Ensure FRONTEND_URL is defined in your .env (e.g., http://localhost:3000)
     const verificationUrl = `${env.ALLOWED_ORIGIN}/verify-email?token=${verificationToken}`;
 
     // 7. Send Email
-    await sendEmail({
-      email: newUser.rows[0].email,
+    await sendMail({
+      to: newUser.rows[0].email, // FIX: Changed 'email' to 'to'
       subject: 'Verify your AkiliCode Account',
-      message: `Welcome to AkiliCode! Please verify your account using this link: ${verificationUrl}`,
+      text: `Welcome to AkiliCode! Please verify your account using this link: ${verificationUrl}`, // FIX: Changed 'message' to 'text'
       html: buildVerificationLinkHtml({
         email: newUser.rows[0].email,
         name: newUser.rows[0].name,
@@ -216,10 +215,10 @@ export const forgotPassword = async (req: Request, res: Response, next: NextFunc
     const resetUrl = `${env.ALLOWED_ORIGIN}/reset-password?token=${resetToken}`;
 
     // 5. Send email
-    await sendEmail({
-      email: user.email,
+    await sendMail({
+      to: user.email, // Changed from 'email' to 'to'
       subject: 'Reset your AkiliCode Password',
-      message: `You requested a password reset. Click this link to reset your password: ${resetUrl}. This link expires in 1 hour.`,
+      text: `You requested a password reset. Click this link to reset your password: ${resetUrl}. This link expires in 1 hour.`, // Changed from 'message' to 'text'
       html: buildResetPasswordLinkHtml({
         email: user.email,
         name: user.name,
