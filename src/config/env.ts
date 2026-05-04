@@ -13,14 +13,10 @@ interface Config {
   JWT_REFRESH_SECRET: string;
   JWT_ACCESS_EXPIRES_IN: string;
   JWT_REFRESH_EXPIRES_IN: string;
-  // Brevo/Email Configuration
+  // Brevo Configuration
   BREVO_API_KEY: string;
   MAIL_FROM_NAME: string;
   MAIL_FROM_EMAIL: string;
-  EMAIL_HOST: string;
-  EMAIL_PORT: number;
-  EMAIL_USER: string;
-  EMAIL_PASS: string;
   LOGO_URL: string;
   // M-Pesa Configuration
   MPESA_CONSUMER_KEY: string;
@@ -42,9 +38,6 @@ const getSanitizedConfig = (config: NodeJS.ProcessEnv): Config => {
     'BREVO_API_KEY',
     'MAIL_FROM_NAME',
     'MAIL_FROM_EMAIL',
-    'EMAIL_HOST',
-    'EMAIL_USER',
-    'EMAIL_PASS',
     // M-Pesa
     'MPESA_CONSUMER_KEY',
     'MPESA_CONSUMER_SECRET',
@@ -62,7 +55,7 @@ const getSanitizedConfig = (config: NodeJS.ProcessEnv): Config => {
   });
 
   return {
-    PORT: Number(config.PORT),
+    PORT: Number(config.PORT) || 5000,
     NODE_ENV: config.NODE_ENV || 'development',
     ALLOWED_ORIGIN: config.ALLOWED_ORIGIN || '*',
     DATABASE_URL: config.DATABASE_URL || '',
@@ -71,14 +64,10 @@ const getSanitizedConfig = (config: NodeJS.ProcessEnv): Config => {
     JWT_REFRESH_SECRET: config.JWT_REFRESH_SECRET!,
     JWT_ACCESS_EXPIRES_IN: config.JWT_ACCESS_EXPIRES_IN || '15m',
     JWT_REFRESH_EXPIRES_IN: config.JWT_REFRESH_EXPIRES_IN || '7d',
-    // Brevo / Email Values
+    // Brevo Values
     BREVO_API_KEY: config.BREVO_API_KEY!,
     MAIL_FROM_NAME: config.MAIL_FROM_NAME!,
     MAIL_FROM_EMAIL: config.MAIL_FROM_EMAIL!,
-    EMAIL_HOST: config.EMAIL_HOST!,
-    EMAIL_PORT: Number(config.EMAIL_PORT) || 465,
-    EMAIL_USER: config.EMAIL_USER!,
-    EMAIL_PASS: config.EMAIL_PASS!,
     LOGO_URL: config.LOGO_URL || '',
     // M-Pesa Values
     MPESA_CONSUMER_KEY: config.MPESA_CONSUMER_KEY!,
