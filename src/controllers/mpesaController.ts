@@ -120,13 +120,13 @@ export const checkPaymentStatus = async (req: AuthRequest, res: Response, next: 
 
     if (paymentResult.rows.length === 0) {
       const enrollment = await client.query(
-        `SELECT status FROM enrollments WHERE id = $1 AND parent_id = $2`,
+        `SELECT status, payment_status FROM enrollments WHERE id = $1 AND parent_id = $2`,
         [enrollmentId, parentId]
       );
       return res.status(200).json({
         status: 'success',
         data: {
-          payment_status: enrollment.rows[0]?.status === 'active' ? 'completed' : 'not_found',
+          payment_status: enrollment.rows[0]?.payment_status === 'paid' ? 'completed' : 'not_found',
           enrollment_status: enrollment.rows[0]?.status,
         }
       });
@@ -157,7 +157,7 @@ export const checkPaymentStatus = async (req: AuthRequest, res: Response, next: 
         [mpesaRef, payment.id]
       );
 
-      const enrollmentId = req.params.enrollmentId as string;  // ← replaces old UPDATE
+      await confirmEnrollmentPayment(client, payment.enrollment_id); // ✅ was missing
 
       await client.query('COMMIT');
 

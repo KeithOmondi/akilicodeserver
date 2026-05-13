@@ -1,12 +1,13 @@
 import { IUser } from '../interfaces/user.interface';
+import { IKid } from '../interfaces/kid.interface';
 
 declare global {
   namespace Express {
     interface Request {
-      user?: IUser;
+      // The current session entity could be a User or a Kid
+      user?: IUser | IKid;
     }
   }
 }
 
-// This empty export is a trick to tell TS to treat this as a module
 export {};

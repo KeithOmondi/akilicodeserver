@@ -3,9 +3,14 @@ import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { IUser } from '../interfaces/user.interface';
 import { calculateNextPaymentDate } from '../utils/paymentSchedule';
+import { IKid } from '../interfaces/kid.interface';
 
 interface AuthRequest extends Request {
   user?: IUser;
+}
+
+interface KidAuthRequest extends Request {
+  kid?: IKid;
 }
 
 /**
@@ -269,3 +274,80 @@ export const getEnrollmentById = async (req: AuthRequest, res: Response, next: N
   }
 };
 
+/**
+ * GET MY ENROLLED COURSES (KID VIEW)
+ * Kids can only view courses they have been enrolled in by their parent
+ * Only shows active enrollments (paid and activated)
+ */
+export const getMyEnrolledCourses = async (req: KidAuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    
+    if (!kidId) {
+      return next(new AppError('Unauthorized access. Please login as a kid.', 401));
+    }
+
+    const result = await pool.query(
+      `SELECT 
+        e.id as enrollment_id,
+        e.course_name,
+        e.fee_amount,
+        e.billing_cycle,
+        e.start_date,
+        e.status as enrollment_status,
+        e.created_at as enrolled_at,
+        c.id as course_id,
+        c.description,
+        c.duration,
+        c.image_url,
+        c.category,
+        -- Calculate progress based on completed lessons
+        (
+          SELECT COUNT(*)::int 
+          FROM kid_progress kp
+          WHERE kp.enrollment_id = e.id AND kp.completed = true
+        ) as completed_lessons,
+        (
+          SELECT COUNT(*)::int 
+          FROM lessons l
+          JOIN modules m ON m.id = l.module_id
+          WHERE m.course_id = c.id
+        ) as total_lessons
+       FROM enrollments e
+       LEFT JOIN courses c ON c.title = e.course_name
+       WHERE e.kid_id = $1 
+         AND e.status = 'active'
+       ORDER BY e.created_at DESC`,
+      [kidId]
+    );
+
+    // Calculate progress percentage and format the response
+    const courses = result.rows.map((course) => {
+      const total = parseInt(course.total_lessons) || 0;
+      const completed = parseInt(course.completed_lessons) || 0;
+      
+      return {
+        id: course.course_id,
+        enrollment_id: course.enrollment_id,
+        name: course.course_name,
+        description: course.description,
+        duration: course.duration,
+        image: course.image_url,
+        category: course.category,
+        enrolled_at: course.enrolled_at,
+        status: course.enrollment_status,
+        progress: total > 0 ? Math.round((completed / total) * 100) : 0,
+        completed_lessons: completed,
+        total_lessons: total,
+      };
+    });
+
+    res.status(200).json({
+      status: 'success',
+      results: courses.length,
+      data: { courses }
+    });
+  } catch (error) {
+    next(error);
+  }
+};

@@ -1,40 +1,29 @@
 import { Response } from 'express';
 import jwt, { Secret, SignOptions } from 'jsonwebtoken';
 import env from '../config/env';
-import { IUser } from '../interfaces/user.interface'; // Import your interface
 
-/**
- * Update signToken to accept the full payload info
- */
-const signToken = (user: IUser, secret: Secret, expiresIn: string | number) => {
-  const options: SignOptions = {
-    expiresIn: expiresIn as any
-  };
+interface TokenPayload {
+  id: string;
+  role: string;
+  name: string;
+  phone?: string;
+  email?: string;
+}
 
-  // We pack all the necessary info into the payload
-  return jwt.sign(
-    { 
-      id: user.id, 
-      role: user.role, 
-      name: user.name, 
-      phone: user.phone 
-    }, 
-    secret, 
-    options
-  );
+const signToken = (payload: TokenPayload, secret: Secret, expiresIn: string | number) => {
+  const options: SignOptions = { expiresIn: expiresIn as any };
+  return jwt.sign(payload, secret, options);
 };
 
-export const sendToken = (user: IUser, statusCode: number, res: Response) => {
+export const sendToken = (entity: TokenPayload, statusCode: number, res: Response, dataKey: 'user' | 'kid' = 'user') => {
   const accessSecret = env.JWT_ACCESS_SECRET as Secret;
   const refreshSecret = env.JWT_REFRESH_SECRET as Secret;
 
-  // 1. Create Tokens using the full user object
-  const accessToken = signToken(user, accessSecret, env.JWT_ACCESS_EXPIRES_IN);
-  const refreshToken = signToken(user, refreshSecret, env.JWT_REFRESH_EXPIRES_IN);
+  const accessToken = signToken(entity, accessSecret, env.JWT_ACCESS_EXPIRES_IN);
+  const refreshToken = signToken(entity, refreshSecret, env.JWT_REFRESH_EXPIRES_IN);
 
-  // 2. Setup Cookie Options
   const cookieOptions = {
-    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), 
+    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     httpOnly: true,
     secure: env.NODE_ENV === 'production',
     sameSite: 'lax' as const,
@@ -46,11 +35,12 @@ export const sendToken = (user: IUser, statusCode: number, res: Response) => {
     status: 'success',
     accessToken,
     data: {
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role
+      [dataKey]: {
+        id: entity.id,
+        name: entity.name,
+        role: entity.role,
+        ...(entity.email && { email: entity.email }),
+        ...(entity.phone && { phone: entity.phone }),
       },
     },
   });

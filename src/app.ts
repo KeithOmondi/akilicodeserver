@@ -12,6 +12,11 @@ import enrollmentRoutes from './routes/enrollmentRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import mpesaRoutes from './routes/mpesaRoutes';
 import courseRoutes from "./routes/courseRoutes"
+import trialRoutes from "./routes/trialRoutes"
+import blogRoutes from "./routes/blogRoutes"
+import testimonialRoutes from "./routes/testimonialRoutes"
+import kidLearningRoutes from "./routes/kidLearningRoutes"
+import codePlaygroundRoutes from "./routes/CodePlaygroundRoutes"
 
 const app: Application = express();
 
@@ -43,6 +48,11 @@ app.use('/api/v1/enrollments', enrollmentRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/mpesa', mpesaRoutes);
 app.use('/api/v1/courses', courseRoutes)
+app.use('/api/v1/trials', trialRoutes)
+app.use('/api/v1/blog', blogRoutes)
+app.use('/api/v1/testimonials', testimonialRoutes)
+app.use("/api/v1/learning", kidLearningRoutes)
+app.use("/api/v1/playground", codePlaygroundRoutes)
 
 app.use(notFound);
 app.use(globalErrorHandler);

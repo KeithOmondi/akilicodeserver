@@ -3,9 +3,13 @@ import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { IUser } from '../interfaces/user.interface';
 import bcrypt from 'bcryptjs';
+import { IKid } from '../interfaces/kid.interface';
+import jwt from 'jsonwebtoken';
+import { sendToken } from '../utils/sendToken';
 
-interface AuthRequest extends Request {
-  user?: IUser;
+// Use Omit to prevent the "Incorrectly extends interface Request" error
+interface AuthRequest extends Omit<Request, 'user'> {
+  user?: IUser | IKid;
 }
 
 // ─── REGISTER A KID ───────────────────────────────────────────────────────────
@@ -98,12 +102,17 @@ export const getKidById = async (req: AuthRequest, res: Response, next: NextFunc
 
 export const setKidLogin = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const parentId = req.user?.id;
-    if (!parentId) return next(new AppError('Unauthorized access.', 401));
+    // 1. Type Guard: Ensure we have a user and they are a parent/admin
+    const user = req.user;
+    if (!user || user.role === 'kid') {
+      return next(new AppError('Only parents can set kid login credentials.', 403));
+    }
 
+    const parentId = user.id; // TS now knows 'id' exists on IUser
     const { kidId } = req.params;
     const { username, pin } = req.body;
 
+    // 2. Validation
     if (!username || !pin) {
       return next(new AppError('Please provide a username and PIN.', 400));
     }
@@ -112,38 +121,31 @@ export const setKidLogin = async (req: AuthRequest, res: Response, next: NextFun
       return next(new AppError('PIN must be exactly 4 digits.', 400));
     }
 
-    if (username.length < 3 || username.length > 20) {
-      return next(new AppError('Username must be between 3 and 20 characters.', 400));
-    }
-
-    // Verify kid belongs to this parent
-    const kidCheck = await pool.query(
-      'SELECT id FROM kids WHERE id = $1 AND parent_id = $2',
-      [kidId, parentId]
-    );
-    if (kidCheck.rows.length === 0) {
-      return next(new AppError('Kid not found or does not belong to you.', 404));
-    }
-
-    // Check username is not taken by another kid
+    // 3. Check for Username Collisions (Kid Table)
     const usernameCheck = await pool.query(
       'SELECT id FROM kids WHERE username = $1 AND id != $2',
-      [username.toLowerCase(), kidId]
+      [username.toLowerCase().trim(), kidId]
     );
+
     if (usernameCheck.rows.length > 0) {
-      return next(new AppError('That username is already taken. Try another.', 409));
+      return next(new AppError('That username is already taken.', 409));
     }
 
+    // 4. Hash and Update
     const pin_hash = await bcrypt.hash(pin, 12);
 
     const result = await pool.query(
-      `UPDATE kids
-       SET username = $1, pin_hash = $2
-       WHERE id = $3 AND parent_id = $4
-       RETURNING id, name, username, avatar,
-                 CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin`,
-      [username.toLowerCase(), pin_hash, kidId, parentId]
+      `UPDATE kids 
+       SET username = $1, pin_hash = $2 
+       WHERE id = $3 AND parent_id = $4 
+       RETURNING id, name, username, avatar, 
+       (pin_hash IS NOT NULL) AS has_pin`, // Simplified Boolean check
+      [username.toLowerCase().trim(), pin_hash, kidId, parentId]
     );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Kid not found or access denied.', 404));
+    }
 
     res.status(200).json({
       status: 'success',
@@ -265,8 +267,7 @@ export const kidLogin = async (req: Request, res: Response, next: NextFunction) 
 
     const result = await pool.query(
       `SELECT id, parent_id, name, age, grade, avatar, username, pin_hash
-       FROM kids
-       WHERE username = $1`,
+       FROM kids WHERE username = $1`,
       [username.toLowerCase()]
     );
 
@@ -285,12 +286,33 @@ export const kidLogin = async (req: Request, res: Response, next: NextFunction) 
       return next(new AppError('Incorrect username or PIN.', 401));
     }
 
-    // Return kid data without pin_hash
-    const { pin_hash, ...kidData } = kid;
+    // Use the shared sendToken utility, passing 'kid' as the data key
+    sendToken({ ...kid, role: 'kid' }, 200, res, 'kid');
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getKidMe = async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.user?.id;
+    if (!kidId) return next(new AppError('Unauthorized.', 401));
+
+    const result = await pool.query(
+      `SELECT id, parent_id, name, age, grade, avatar, username,
+              CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin,
+              created_at
+       FROM kids WHERE id = $1`,
+      [kidId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Kid not found.', 404));
+    }
 
     res.status(200).json({
       status: 'success',
-      data: { kid: kidData },
+      data: { kid: { ...result.rows[0], role: 'kid' } },
     });
   } catch (error) {
     next(error);

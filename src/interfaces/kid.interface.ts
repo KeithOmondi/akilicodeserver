@@ -1,12 +1,17 @@
+
+
+
+
 export interface IKid {
   id: string;
   parent_id: string;
   name: string;
+  role: 'kid';         // <--- Add this line
   age: number;
   grade?: string;
   avatar?: string;
   username?: string;
-  has_pin?: boolean;   // computed — true if pin_hash is set, never expose pin_hash to client
+  has_pin?: boolean;
   created_at: Date;
 }
 

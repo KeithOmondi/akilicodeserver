@@ -1,0 +1,486 @@
+// controllers/kidLearningController.ts
+import { Request, Response, NextFunction } from 'express';
+import pool from '../config/db';
+import { AppError } from '../utils/appError';
+import { IKid } from '../interfaces/kid.interface';
+
+interface KidRequest extends Request {
+  kid?: IKid;
+}
+
+/**
+ * GET ALL ENROLLED COURSES FOR THE KID
+ * Returns courses the kid is actively enrolled in with progress
+ */
+export const getMyCourses = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    const result = await pool.query(
+      `SELECT 
+        e.id as enrollment_id,
+        e.course_name,
+        e.status as enrollment_status,
+        e.created_at as enrolled_at,
+        c.id as course_id,
+        c.title,
+        c.description,
+        c.duration,
+        c.image_url,
+        c.category,
+        (
+          SELECT COUNT(*)::int 
+          FROM kid_progress kp
+          WHERE kp.enrollment_id = e.id AND kp.completed = true
+        ) as completed_lessons,
+        (
+          SELECT COUNT(*)::int 
+          FROM lessons l
+          JOIN modules m ON m.id = l.module_id
+          WHERE m.course_id = c.id
+        ) as total_lessons
+       FROM enrollments e
+       LEFT JOIN courses c ON c.title = e.course_name
+       WHERE e.kid_id = $1 
+         AND e.status = 'active'
+       ORDER BY e.created_at DESC`,
+      [kidId]
+    );
+
+    const courses = result.rows.map((course) => ({
+      id: course.course_id,
+      enrollment_id: course.enrollment_id,
+      title: course.title || course.course_name,
+      description: course.description,
+      duration: course.duration,
+      image: course.image_url,
+      category: course.category,
+      enrolled_at: course.enrolled_at,
+      status: course.enrollment_status,
+      progress: course.total_lessons > 0 
+        ? Math.round((course.completed_lessons / course.total_lessons) * 100) 
+        : 0,
+      completed_lessons: course.completed_lessons,
+      total_lessons: course.total_lessons,
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      results: courses.length,
+      data: { courses }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET COURSE DETAILS WITH MODULES AND LESSONS
+ * Returns full curriculum for a specific enrolled course
+ */
+export const getCourseContent = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    const { courseId } = req.params;
+
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    // Verify kid is enrolled in this course
+    const enrollmentCheck = await pool.query(
+      `SELECT e.id FROM enrollments e
+       WHERE e.kid_id = $1 AND e.course_name = (
+         SELECT title FROM courses WHERE id = $2
+       ) AND e.status = 'active'`,
+      [kidId, courseId]
+    );
+
+    if (enrollmentCheck.rows.length === 0) {
+      return next(new AppError('You are not enrolled in this course', 403));
+    }
+
+    // Get course details
+    const courseResult = await pool.query(
+      `SELECT * FROM courses WHERE id = $1`,
+      [courseId]
+    );
+
+    if (courseResult.rows.length === 0) {
+      return next(new AppError('Course not found', 404));
+    }
+
+    // Get modules with lessons
+    const modulesResult = await pool.query(
+      `SELECT 
+        m.*,
+        json_agg(
+          json_build_object(
+            'id', l.id,
+            'title', l.title,
+            'notes', l.notes,
+            'language', l.language,
+            'starter_code', l.starter_code,
+            'order_index', l.order_index,
+            'completed', COALESCE(kp.completed, false),
+            'points_earned', COALESCE(kp.points_earned, 0)
+          ) ORDER BY l.order_index
+        ) as lessons
+       FROM modules m
+       LEFT JOIN lessons l ON l.module_id = m.id
+       LEFT JOIN kid_progress kp ON kp.lesson_id = l.id AND kp.enrollment_id = (
+         SELECT id FROM enrollments WHERE kid_id = $1 AND course_name = (SELECT title FROM courses WHERE id = $2)
+       )
+       WHERE m.course_id = $2
+       GROUP BY m.id
+       ORDER BY m.order_index ASC`,
+      [kidId, courseId]
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        course: courseResult.rows[0],
+        modules: modulesResult.rows
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET A SINGLE LESSON
+ */
+export const getLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    const { lessonId } = req.params;
+
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    const result = await pool.query(
+      `SELECT 
+        l.*,
+        m.course_id,
+        (
+          SELECT title FROM courses WHERE id = m.course_id
+        ) as course_title
+       FROM lessons l
+       JOIN modules m ON m.id = l.module_id
+       WHERE l.id = $1`,
+      [lessonId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Lesson not found', 404));
+    }
+
+    const lesson = result.rows[0];
+
+    // Check if kid is enrolled in this course
+    const enrollmentCheck = await pool.query(
+      `SELECT e.id FROM enrollments e
+       WHERE e.kid_id = $1 AND e.course_name = $2 AND e.status = 'active'`,
+      [kidId, lesson.course_title]
+    );
+
+    if (enrollmentCheck.rows.length === 0) {
+      return next(new AppError('You are not enrolled in this course', 403));
+    }
+
+    // Get progress for this lesson
+    const progressResult = await pool.query(
+      `SELECT * FROM kid_progress 
+       WHERE kid_id = $1 AND lesson_id = $2
+       LIMIT 1`,
+      [kidId, lessonId]
+    );
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        lesson: {
+          ...lesson,
+          completed: progressResult.rows[0]?.completed || false,
+          points_earned: progressResult.rows[0]?.points_earned || 0,
+          code_submitted: progressResult.rows[0]?.code_submitted,
+          completed_at: progressResult.rows[0]?.completed_at
+        }
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * SUBMIT LESSON SOLUTION AND EARN POINTS
+ */
+export const submitLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
+  const client = await pool.connect();
+  try {
+    const kidId = req.kid?.id;
+    const { lessonId } = req.params;
+    const { code_submitted } = req.body;
+
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    await client.query('BEGIN');
+
+    // Get lesson details and verify enrollment
+    const lessonResult = await client.query(
+      `SELECT 
+        l.*,
+        m.course_id,
+        (SELECT title FROM courses WHERE id = m.course_id) as course_title
+       FROM lessons l
+       JOIN modules m ON m.id = l.module_id
+       WHERE l.id = $1`,
+      [lessonId]
+    );
+
+    if (lessonResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return next(new AppError('Lesson not found', 404));
+    }
+
+    const lesson = lessonResult.rows[0];
+
+    // Verify enrollment
+    const enrollmentResult = await client.query(
+      `SELECT e.id FROM enrollments e
+       WHERE e.kid_id = $1 AND e.course_name = $2 AND e.status = 'active'`,
+      [kidId, lesson.course_title]
+    );
+
+    if (enrollmentResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return next(new AppError('You are not enrolled in this course', 403));
+    }
+
+    const enrollmentId = enrollmentResult.rows[0].id;
+
+    // Check if already completed
+    const existingProgress = await client.query(
+      `SELECT * FROM kid_progress 
+       WHERE kid_id = $1 AND lesson_id = $2 AND enrollment_id = $3`,
+      [kidId, lessonId, enrollmentId]
+    );
+
+    if (existingProgress.rows.length > 0 && existingProgress.rows[0].completed) {
+      await client.query('ROLLBACK');
+      return next(new AppError('Lesson already completed', 400));
+    }
+
+    // Calculate points (base points + bonus for early completion)
+    const basePoints = 10;
+    const bonusPoints = 0; // Could add bonus logic here
+    const totalPoints = basePoints + bonusPoints;
+
+    // Insert or update progress
+    const progressResult = await client.query(
+      `INSERT INTO kid_progress 
+        (kid_id, lesson_id, enrollment_id, completed, points_earned, code_submitted, completed_at)
+       VALUES ($1, $2, $3, true, $4, $5, NOW())
+       ON CONFLICT (kid_id, lesson_id, enrollment_id) 
+       DO UPDATE SET 
+         completed = true,
+         points_earned = EXCLUDED.points_earned,
+         code_submitted = EXCLUDED.code_submitted,
+         completed_at = NOW(),
+         updated_at = NOW()
+       RETURNING *`,
+      [kidId, lessonId, enrollmentId, totalPoints, code_submitted || null]
+    );
+
+    // Update kid's total points
+    await client.query(
+      `UPDATE kids 
+       SET total_points = COALESCE(total_points, 0) + $1
+       WHERE id = $2`,
+      [totalPoints, kidId]
+    );
+
+    await client.query('COMMIT');
+
+    res.status(200).json({
+      status: 'success',
+      message: 'Lesson submitted successfully!',
+      data: {
+        progress: progressResult.rows[0],
+        points_earned: totalPoints,
+        message: `Great job! You earned ${totalPoints} points! 🎉`
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    next(error);
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * GET KID'S DASHBOARD STATS
+ */
+export const getDashboardStats = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    // Get kid info with points
+    const kidResult = await pool.query(
+      `SELECT 
+        name,
+        age,
+        grade,
+        avatar,
+        total_points,
+        COALESCE(streak_days, 0) as streak_days
+       FROM kids
+       WHERE id = $1`,
+      [kidId]
+    );
+
+    // Get course stats
+    const courseStats = await pool.query(
+      `SELECT 
+        COUNT(DISTINCT e.id) as total_courses,
+        COUNT(DISTINCT CASE WHEN kp.completed = true THEN e.id END) as completed_courses,
+        SUM(CASE WHEN kp.completed = true THEN 1 ELSE 0 END) as completed_lessons,
+        COUNT(DISTINCT l.id) as total_lessons
+       FROM enrollments e
+       LEFT JOIN kid_progress kp ON kp.enrollment_id = e.id
+       LEFT JOIN lessons l ON l.id = kp.lesson_id
+       WHERE e.kid_id = $1 AND e.status = 'active'`,
+      [kidId]
+    );
+
+    // Get recent achievements
+    const recentAchievements = await pool.query(
+      `SELECT 
+        'Completed Lesson' as type,
+        l.title as name,
+        kp.completed_at as earned_at,
+        kp.points_earned
+       FROM kid_progress kp
+       JOIN lessons l ON l.id = kp.lesson_id
+       WHERE kp.kid_id = $1 AND kp.completed = true
+       ORDER BY kp.completed_at DESC
+       LIMIT 5`,
+      [kidId]
+    );
+
+    // Calculate level based on points
+    const totalPoints = kidResult.rows[0]?.total_points || 0;
+    const level = Math.floor(totalPoints / 100) + 1;
+    const nextLevelPoints = level * 100;
+    const pointsToNextLevel = nextLevelPoints - totalPoints;
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        kid: kidResult.rows[0],
+        stats: {
+          total_courses: parseInt(courseStats.rows[0]?.total_courses) || 0,
+          completed_courses: parseInt(courseStats.rows[0]?.completed_courses) || 0,
+          completed_lessons: parseInt(courseStats.rows[0]?.completed_lessons) || 0,
+          total_lessons: parseInt(courseStats.rows[0]?.total_lessons) || 0,
+          total_points: totalPoints,
+          level: level,
+          points_to_next_level: pointsToNextLevel,
+          streak_days: kidResult.rows[0]?.streak_days || 0
+        },
+        recent_achievements: recentAchievements.rows
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET LEADERBOARD (TOP KIDS BY POINTS)
+ */
+export const getLeaderboard = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const result = await pool.query(
+      `SELECT 
+        k.id,
+        k.name,
+        k.avatar,
+        k.total_points,
+        COALESCE(k.streak_days, 0) as streak_days,
+        COUNT(DISTINCT kp.lesson_id) as lessons_completed
+       FROM kids k
+       LEFT JOIN kid_progress kp ON kp.kid_id = k.id AND kp.completed = true
+       WHERE k.total_points > 0
+       GROUP BY k.id
+       ORDER BY k.total_points DESC
+       LIMIT $1`,
+      [limit]
+    );
+
+    // Add rank to each kid
+    const leaderboard = result.rows.map((kid, index) => ({
+      rank: index + 1,
+      ...kid
+    }));
+
+    res.status(200).json({
+      status: 'success',
+      data: { leaderboard }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET KID'S ACHIEVEMENTS / BADGES
+ */
+export const getAchievements = async (req: KidRequest, res: Response, next: NextFunction) => {
+  try {
+    const kidId = req.kid?.id;
+    if (!kidId) return next(new AppError('Unauthorized access.', 401));
+
+    const result = await pool.query(
+      `SELECT 
+        COUNT(DISTINCT lesson_id) as total_lessons_completed,
+        SUM(points_earned) as total_points_earned,
+        COUNT(DISTINCT CASE 
+          WHEN completed_at > NOW() - INTERVAL '7 days' THEN lesson_id 
+        END) as lessons_this_week
+       FROM kid_progress
+       WHERE kid_id = $1 AND completed = true`,
+      [kidId]
+    );
+
+    // Calculate badges earned
+    const completed = parseInt(result.rows[0]?.total_lessons_completed) || 0;
+    const badges = [];
+
+    if (completed >= 1) badges.push({ name: 'First Step', icon: '🌟', earned: true });
+    if (completed >= 5) badges.push({ name: 'Rising Star', icon: '⭐', earned: true });
+    if (completed >= 10) badges.push({ name: 'Code Master', icon: '🏆', earned: true });
+    if (completed >= 25) badges.push({ name: 'Legendary Coder', icon: '🎖️', earned: true });
+    if (completed >= 50) badges.push({ name: 'Coding Hero', icon: '🦸', earned: true });
+
+    // Add upcoming badges
+    if (completed < 5) badges.push({ name: 'Rising Star', icon: '⭐', earned: false, needed: 5 - completed });
+    if (completed < 10) badges.push({ name: 'Code Master', icon: '🏆', earned: false, needed: 10 - completed });
+    if (completed < 25) badges.push({ name: 'Legendary Coder', icon: '🎖️', earned: false, needed: 25 - completed });
+
+    res.status(200).json({
+      status: 'success',
+      data: {
+        stats: result.rows[0],
+        badges
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};

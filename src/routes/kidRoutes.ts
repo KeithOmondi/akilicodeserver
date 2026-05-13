@@ -9,6 +9,11 @@ const router = express.Router();
 // Kid logs in with username + PIN (no auth token needed)
 router.post("/login", kidController.kidLogin);
 
+// ─── KID PROTECTED ────────────────────────────────────────────────────────────
+
+// Kid restores their own session on page refresh (authenticated by kid JWT)
+router.get("/me", isAuthenticated, kidController.getKidMe);
+
 // ─── PARENT PROTECTED ─────────────────────────────────────────────────────────
 
 router.use(isAuthenticated);
