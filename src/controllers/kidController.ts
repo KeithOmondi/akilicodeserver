@@ -256,7 +256,6 @@ export const updateKid = async (req: AuthRequest, res: Response, next: NextFunct
 };
 
 // ─── KID LOGIN ────────────────────────────────────────────────────────────────
-
 export const kidLogin = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { username, pin } = req.body;

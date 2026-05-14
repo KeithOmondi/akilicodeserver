@@ -12,7 +12,6 @@ import { isAuthenticated, isAuthorized } from "../middleware/authMiddleware";
 
 const router = Router();
 
-// Apply global authentication
 router.use(isAuthenticated);
 
 /**
@@ -25,13 +24,17 @@ router.get("/my-courses", isAuthorized("kid"), getMyEnrolledCourses);
  */
 router.post("/create", isAuthorized("parent"), enrollKid);
 router.get("/get", isAuthorized("parent"), getMyEnrollments);
-router.get("/:enrollmentId", isAuthorized("parent", "kid"), getEnrollmentById);
 
 /**
- * ADMIN ROUTES
+ * ADMIN ROUTES — must be before /:enrollmentId
  */
 router.get("/all", isAuthorized("admin"), getAllEnrollments);
 router.get("/kid/:kidId", isAuthorized("admin"), getKidEnrollments);
-router.patch("/:enrollmentId/cancel", isAuthorized("admin"), cancelEnrollment);
+
+/**
+ * PARAM ROUTES — always last
+ */
+router.get("/:enrollmentId", isAuthorized("parent", "kid"), getEnrollmentById);
+router.patch("/:enrollmentId/cancel", isAuthorized("admin", "parent"), cancelEnrollment);
 
 export default router;

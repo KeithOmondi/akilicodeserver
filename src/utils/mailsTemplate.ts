@@ -450,3 +450,241 @@ export const buildPaymentReminderHtml = (data: PaymentReminderData): string => {
 </body>
 </html>`;
 };
+
+export interface VerificationEmailData {
+  email: string;
+  name: string;
+  token: string;
+}
+
+export const sendVerificationEmail = async (data: VerificationEmailData): Promise<void> => {
+  const verificationUrl = `${process.env.APP_URL || 'http://localhost:3000'}/verify-email?token=${data.token}`;
+  
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+    body { background-color: #f4f1fb; font-family: 'Poppins', sans-serif; padding: 40px 16px; margin: 0; }
+    .wrapper { max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .header { background: #3B1FA3; padding: 32px; }
+    .brand-name { font-size: 22px; font-weight: 700; color: #ffffff; }
+    .brand-name span { color: #F5A623; }
+    .content { padding: 40px; }
+    .content h2 { color: #3B1FA3; margin-bottom: 16px; }
+    .content p { color: #666; line-height: 1.6; margin-bottom: 24px; }
+    .button { 
+      display: inline-block; 
+      padding: 14px 32px; 
+      background: #3B1FA3; 
+      color: #ffffff !important; 
+      text-decoration: none; 
+      border-radius: 8px; 
+      font-weight: 600; 
+      margin: 16px 0;
+      box-shadow: 0 4px 12px rgba(59, 31, 163, 0.2);
+    }
+    .button:hover { background: #2D1690; }
+    .footer { font-size: 12px; color: #9989c5; padding: 20px 40px 30px; border-top: 1px solid #f0eafa; background: #f9f9f9; }
+    .note { font-size: 12px; color: #999; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <div class="brand-name">Akili<span>&lt;&gt;</span>Code</div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 8px;">Think · Code · Create · Grow</div>
+    </div>
+    <div class="content">
+      <h2>Welcome to AkiliCode! 🎉</h2>
+      <p>Hi <strong>${data.name}</strong>,</p>
+      <p>Thank you for joining our coding community for kids. Please verify your email address to get started and create coding profiles for your children.</p>
+      <a href="${verificationUrl}" class="button">Verify My Email</a>
+      <p class="note">🔒 This link will expire in 24 hours.</p>
+      <p class="note">If you didn't create an account, you can safely ignore this email.</p>
+    </div>
+    <div class="footer">
+      <p>&copy; 2025 AkiliCode. All rights reserved.</p>
+      <p>support@akilicode.com</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sendMail({
+    to: data.email,
+    subject: `Verify Your Email - AkiliCode`,
+    text: `Hi ${data.name},\n\nPlease verify your email address by clicking this link: ${verificationUrl}\n\nThis link expires in 24 hours.\n\nIf you didn't create an account, please ignore this email.\n\n- AkiliCode Team`,
+    html,
+  });
+};
+
+export interface ParentalConsentEmailData {
+  parentEmail: string;
+  parentName: string;
+  kidName: string;
+  kidUsername: string;
+  consentMethod: string;
+  consentDate: Date;
+  dashboardUrl: string;
+}
+
+export const sendParentalConsentEmail = async (data: ParentalConsentEmailData): Promise<void> => {
+  const formattedDate = data.consentDate.toLocaleDateString('en-KE', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+    body { background-color: #f4f1fb; font-family: 'Poppins', sans-serif; padding: 40px 16px; margin: 0; }
+    .wrapper { max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .header { background: #3B1FA3; padding: 32px; text-align: center; }
+    .brand-name { font-size: 22px; font-weight: 700; color: #ffffff; }
+    .brand-name span { color: #F5A623; }
+    .content { padding: 40px; }
+    .content h2 { color: #3B1FA3; margin-bottom: 24px; }
+    .content p { color: #333; line-height: 1.6; margin-bottom: 16px; }
+    .consent-box { background: #f4f1fb; padding: 24px; border-radius: 12px; margin: 24px 0; border-left: 4px solid #4CAF50; }
+    .consent-box p { margin: 8px 0; font-size: 14px; }
+    .consent-box strong { color: #3B1FA3; }
+    .button { 
+      display: inline-block; 
+      padding: 14px 32px; 
+      background: #3B1FA3; 
+      color: #ffffff !important; 
+      text-decoration: none; 
+      border-radius: 8px; 
+      font-weight: 600; 
+      margin: 16px 0;
+      box-shadow: 0 4px 12px rgba(59, 31, 163, 0.2);
+    }
+    .footer { font-size: 12px; color: #9989c5; padding: 20px 40px 30px; border-top: 1px solid #f0eafa; background: #f9f9f9; text-align: center; }
+    .note { font-size: 12px; color: #999; margin-top: 20px; }
+    .warning { background: #fff3cd; border: 1px solid #ffc107; padding: 12px; border-radius: 8px; margin: 16px 0; font-size: 13px; color: #856404; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <div class="brand-name">Akili<span>&lt;&gt;</span>Code</div>
+      <div style="font-size: 11px; color: rgba(255,255,255,0.55); margin-top: 8px;">Think · Code · Create · Grow</div>
+    </div>
+    <div class="content">
+      <h2>✅ Parental Consent Confirmed</h2>
+      <p>Dear <strong>${data.parentName}</strong>,</p>
+      <p>You have successfully created a coding profile for <strong>${data.kidName}</strong> on AkiliCode.</p>
+      
+      <div class="consent-box">
+        <p><strong>📋 Consent Details:</strong></p>
+        <p>• Child's Name: <strong>${data.kidName}</strong></p>
+        <p>• Username: <strong>${data.kidUsername}</strong></p>
+        <p>• Date & Time: <strong>${formattedDate}</strong></p>
+        <p>• Method: <strong>${data.consentMethod}</strong></p>
+      </div>
+      
+      <p><strong>🚀 What happens next?</strong></p>
+      <p>${data.kidName} can now log in using their username and PIN to access:</p>
+      <ul style="color: #555; line-height: 1.8;">
+        <li>🎮 Interactive coding games</li>
+        <li>📚 Step-by-step programming lessons</li>
+        <li>💡 Creative coding projects</li>
+        <li>🏆 Achievements and progress tracking</li>
+      </ul>
+      
+      <div style="text-align: center;">
+        <a href="${data.dashboardUrl}" class="button">Go to Parent Dashboard</a>
+      </div>
+      
+      <div class="warning">
+        ⚠️ <strong>Important:</strong> You can manage your child's account, view their progress, update settings, or revoke consent at any time from your parent dashboard.
+      </div>
+      
+      <p class="note">📧 This is an automated confirmation. Please keep this email for your records.</p>
+    </div>
+    <div class="footer">
+      <p>Questions? Contact us at <strong>support@akilicode.com</strong></p>
+      <p>&copy; 2025 AkiliCode. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sendMail({
+    to: data.parentEmail,
+    subject: `Parental Consent Confirmed - ${data.kidName}'s AkiliCode Account`,
+    text: `Dear ${data.parentName},\n\nParental consent has been confirmed for ${data.kidName} (username: ${data.kidUsername}) on AkiliCode.\n\nConsent Date: ${formattedDate}\nMethod: ${data.consentMethod}\n\nYou can manage your child's account at: ${data.dashboardUrl}\n\nIf you did not authorize this, please contact us immediately at support@akilicode.com.\n\n- AkiliCode Team`,
+    html,
+  });
+};
+
+// Optional: Send PIN reset email for kids
+export interface KidPinResetData {
+  parentEmail: string;
+  parentName: string;
+  kidName: string;
+  kidUsername: string;
+  resetUrl: string;
+}
+
+export const sendKidPinResetEmail = async (data: KidPinResetData): Promise<void> => {
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+    body { background-color: #f4f1fb; font-family: 'Poppins', sans-serif; padding: 40px 16px; }
+    .wrapper { max-width: 560px; margin: 0 auto; background: #ffffff; border-radius: 16px; overflow: hidden; text-align: center; }
+    .header { background: #3B1FA3; padding: 32px; }
+    .brand-name { font-size: 22px; font-weight: 700; color: #ffffff; }
+    .brand-name span { color: #F5A623; }
+    .content { padding: 40px; }
+    .icon { font-size: 48px; margin-bottom: 20px; }
+    .button { 
+      display: inline-block; 
+      padding: 14px 32px; 
+      background: #3B1FA3; 
+      color: #ffffff !important; 
+      text-decoration: none; 
+      border-radius: 8px; 
+      font-weight: 600; 
+      margin: 24px 0;
+    }
+    .footer { font-size: 12px; color: #9989c5; padding: 20px 40px 30px; border-top: 1px solid #f0eafa; }
+  </style>
+</head>
+<body>
+  <div class="wrapper">
+    <div class="header">
+      <div class="brand-name">Akili<span>&lt;&gt;</span>Code</div>
+    </div>
+    <div class="content">
+      <div class="icon">🔐</div>
+      <h2 style="color:#3B1FA3;">Reset PIN for ${data.kidName}</h2>
+      <p>Hi ${data.parentName},</p>
+      <p>You requested to reset the PIN for <strong>${data.kidName}</strong> (username: ${data.kidUsername}).</p>
+      <a href="${data.resetUrl}" class="button">Reset PIN</a>
+      <p style="font-size: 12px; color: #999;">This link expires in 1 hour.</p>
+      <p style="font-size: 12px; color: #999;">If you didn't request this, you can safely ignore this email.</p>
+    </div>
+    <div class="footer">&copy; AkiliCode</div>
+  </div>
+</body>
+</html>`;
+
+  await sendMail({
+    to: data.parentEmail,
+    subject: `Reset PIN for ${data.kidName} - AkiliCode`,
+    text: `Hi ${data.parentName},\n\nYou requested to reset the PIN for ${data.kidName} (${data.kidUsername}).\n\nClick this link to reset: ${data.resetUrl}\n\nThis link expires in 1 hour.\n\n- AkiliCode Team`,
+    html,
+  });
+};

@@ -21,12 +21,12 @@ router.get('/dashboard', getDashboardStats);
 router.get('/leaderboard', getLeaderboard);
 router.get('/achievements', getAchievements);
 
-// Courses
+// Courses — entry point is enrollments now
 router.get('/courses', getMyCourses);
-router.get('/courses/:courseId/content', getCourseContent);
+router.get('/enrollments/:enrollmentId/content', getCourseContent);
 
-// Lessons
-router.get('/lessons/:lessonId', getLesson);
-router.post('/lessons/:lessonId/submit', submitLesson);
+// Lessons — scoped under enrollment
+router.get('/enrollments/:enrollmentId/lessons/:lessonId', getLesson);
+router.post('/enrollments/:enrollmentId/lessons/:lessonId/submit', submitLesson);
 
 export default router;

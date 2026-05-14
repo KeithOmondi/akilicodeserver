@@ -43,7 +43,7 @@ export const isAuthenticated = (req: AuthRequest, res: Response, next: NextFunct
         phone: decoded.phone,
         email: '', 
         is_verified: true,
-        createdAt: new Date()
+        created_at: new Date()
       } as IUser;
     }
 

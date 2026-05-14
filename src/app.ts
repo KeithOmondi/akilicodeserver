@@ -17,6 +17,7 @@ import blogRoutes from "./routes/blogRoutes"
 import testimonialRoutes from "./routes/testimonialRoutes"
 import kidLearningRoutes from "./routes/kidLearningRoutes"
 import codePlaygroundRoutes from "./routes/CodePlaygroundRoutes"
+import pricingRoutes from './routes/pricingRoutes';
 
 const app: Application = express();
 
@@ -53,6 +54,7 @@ app.use('/api/v1/blog', blogRoutes)
 app.use('/api/v1/testimonials', testimonialRoutes)
 app.use("/api/v1/learning", kidLearningRoutes)
 app.use("/api/v1/playground", codePlaygroundRoutes)
+app.use('/api/v1/pricing', pricingRoutes);
 
 app.use(notFound);
 app.use(globalErrorHandler);
