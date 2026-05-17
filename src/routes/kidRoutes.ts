@@ -7,7 +7,8 @@ const router = express.Router();
 // ─── PUBLIC ───────────────────────────────────────────────────────────────────
 
 // Kid logs in with username + PIN (no auth token needed)
-router.post("/login", kidController.kidLogin);
+router.post("/login",  kidController.kidLogin);
+
 
 // ─── KID PROTECTED ────────────────────────────────────────────────────────────
 

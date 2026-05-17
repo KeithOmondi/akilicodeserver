@@ -2,6 +2,7 @@ export interface Enrollment {
   id: string;
   kid_id: string;
   parent_id: string;
+  course_id: string;        // ✅ add this
   course_name: string;
   fee_amount: number;
   billing_cycle: 'monthly' | 'termly' | 'once-off';

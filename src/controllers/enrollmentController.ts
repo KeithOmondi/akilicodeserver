@@ -13,47 +13,68 @@ interface KidAuthRequest extends Request {
   kid?: IKid;
 }
 
-/**
- * ENROLL A KID
- */
 export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
 
-    const { kid_id, course_name, fee_amount, billing_cycle, start_date } = req.body;
+    const { kid_id, course_id, fee_amount, billing_cycle, start_date } = req.body;
+    //              ↑ changed from course_name to course_id
 
-    if (!kid_id || !course_name || !fee_amount || !billing_cycle) {
+    if (!kid_id || !course_id || !fee_amount || !billing_cycle) {
       return next(new AppError('Please provide kid, course, fee, and billing cycle.', 400));
     }
 
     await client.query('BEGIN');
 
+    // Verify kid belongs to parent
     const kidCheck = await client.query(
       'SELECT id FROM kids WHERE id = $1 AND parent_id = $2',
       [kid_id, parentId]
     );
-
     if (kidCheck.rows.length === 0) {
       await client.query('ROLLBACK');
       return next(new AppError('Kid not found or does not belong to you.', 404));
     }
 
-    const result = await client.query(
-      `INSERT INTO enrollments (kid_id, parent_id, course_name, fee_amount, billing_cycle, start_date, status)
-       VALUES ($1, $2, $3, $4, $5, $6, 'pending') RETURNING *`,
-      [kid_id, parentId, course_name, fee_amount, billing_cycle, start_date || new Date()]
+    // ✅ Look up course to get name and confirm it exists
+    const courseCheck = await client.query(
+      'SELECT id, title FROM courses WHERE id = $1',
+      [course_id]
     );
+    if (courseCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return next(new AppError('Course not found.', 404));
+    }
 
-    const enrollment = result.rows[0];
+    const course_name = courseCheck.rows[0].title;
+
+    // ✅ Prevent duplicate active enrollment
+    const dupCheck = await client.query(
+      `SELECT id FROM enrollments 
+       WHERE kid_id = $1 AND course_id = $2 AND status NOT IN ('cancelled')`,
+      [kid_id, course_id]
+    );
+    if (dupCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return next(new AppError('This kid is already enrolled in that course.', 409));
+    }
+
+    // ✅ Save both course_id and course_name
+    const result = await client.query(
+      `INSERT INTO enrollments 
+        (kid_id, parent_id, course_id, course_name, fee_amount, billing_cycle, start_date, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending') RETURNING *`,
+      [kid_id, parentId, course_id, course_name, fee_amount, billing_cycle, start_date || new Date()]
+    );
 
     await client.query('COMMIT');
 
     res.status(201).json({
       status: 'success',
       message: 'Enrollment created. Please complete payment to activate.',
-      data: { enrollment }
+      data: { enrollment: result.rows[0] }
     });
   } catch (error) {
     await client.query('ROLLBACK');
@@ -279,29 +300,29 @@ export const getEnrollmentById = async (req: AuthRequest, res: Response, next: N
  * Kids can only view courses they have been enrolled in by their parent
  * Only shows active enrollments (paid and activated)
  */
-export const getMyEnrolledCourses = async (req: KidAuthRequest, res: Response, next: NextFunction) => {
+export const getMyEnrolledCourses = async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.kid?.id;
-    
-    if (!kidId) {
+    // ✅ Read from req.user — that's what isAuthenticated sets
+    const kidId = req.user?.id;
+
+    if (!kidId || req.user?.role !== 'kid') {
       return next(new AppError('Unauthorized access. Please login as a kid.', 401));
     }
 
     const result = await pool.query(
       `SELECT 
         e.id as enrollment_id,
+        e.course_id,
         e.course_name,
         e.fee_amount,
         e.billing_cycle,
         e.start_date,
         e.status as enrollment_status,
         e.created_at as enrolled_at,
-        c.id as course_id,
         c.description,
         c.duration,
         c.image_url,
         c.category,
-        -- Calculate progress based on completed lessons
         (
           SELECT COUNT(*)::int 
           FROM kid_progress kp
@@ -311,24 +332,23 @@ export const getMyEnrolledCourses = async (req: KidAuthRequest, res: Response, n
           SELECT COUNT(*)::int 
           FROM lessons l
           JOIN modules m ON m.id = l.module_id
-          WHERE m.course_id = c.id
+          WHERE m.course_id = e.course_id    -- ✅ use course_id not string match
         ) as total_lessons
        FROM enrollments e
-       LEFT JOIN courses c ON c.title = e.course_name
+       LEFT JOIN courses c ON c.id = e.course_id  -- ✅ join on id not title
        WHERE e.kid_id = $1 
          AND e.status = 'active'
        ORDER BY e.created_at DESC`,
       [kidId]
     );
 
-    // Calculate progress percentage and format the response
     const courses = result.rows.map((course) => {
-      const total = parseInt(course.total_lessons) || 0;
-      const completed = parseInt(course.completed_lessons) || 0;
-      
+      const total = course.total_lessons || 0;
+      const completed = course.completed_lessons || 0;
+
       return {
-        id: course.course_id,
         enrollment_id: course.enrollment_id,
+        course_id: course.course_id,
         name: course.course_name,
         description: course.description,
         duration: course.duration,

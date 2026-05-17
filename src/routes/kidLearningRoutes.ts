@@ -9,7 +9,7 @@ import {
   getLeaderboard,
   getAchievements
 } from '../controllers/kidLearningController';
-import { isAuthenticated } from '../middleware/authMiddleware';
+import { isAuthenticated, isAuthorized } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -23,7 +23,7 @@ router.get('/achievements', getAchievements);
 
 // Courses — entry point is enrollments now
 router.get('/courses', getMyCourses);
-router.get('/enrollments/:enrollmentId/content', getCourseContent);
+router.get('/enrollments/:enrollmentId/content', isAuthorized("kid"), getCourseContent);
 
 // Lessons — scoped under enrollment
 router.get('/enrollments/:enrollmentId/lessons/:lessonId', getLesson);
