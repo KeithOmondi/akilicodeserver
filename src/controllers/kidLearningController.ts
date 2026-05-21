@@ -1,11 +1,9 @@
-// controllers/kidLearningController.ts
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { IUser } from '../interfaces/user.interface';
 import { IKid } from '../interfaces/kid.interface';
 
-// ✅ Use req.user which is what isAuthenticated actually sets
 interface KidRequest extends Omit<Request, 'user'> {
   user?: IUser | IKid;
 }
@@ -15,7 +13,7 @@ interface KidRequest extends Omit<Request, 'user'> {
  */
 export const getMyCourses = async (req: KidRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.user?.id; // ✅ was req.kid?.id
+    const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     const result = await pool.query(
@@ -76,11 +74,11 @@ export const getMyCourses = async (req: KidRequest, res: Response, next: NextFun
 };
 
 /**
- * GET COURSE CONTENT — MODULES AND LESSONS
+ * GET COURSE CONTENT — MODULES AND LESSONS (with assignment)
  */
 export const getCourseContent = async (req: KidRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.user?.id; // ✅
+    const kidId = req.user?.id;
     const { enrollmentId } = req.params;
 
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -99,36 +97,37 @@ export const getCourseContent = async (req: KidRequest, res: Response, next: Nex
     const enrollment = enrollmentResult.rows[0];
 
     const modulesResult = await pool.query(
-  `SELECT 
-    m.id,
-    m.title,
-    m.description,
-    m.order_index,
-    COALESCE(
-      json_agg(
-        json_build_object(
-          'id',           l.id,
-          'title',        l.title,
-          'notes',        l.notes,
-          'language',     l.language,
-          'starter_code', l.starter_code,
-          'order_index',  l.order_index,
-          'completed',    COALESCE(kp.completed, false),
-          'points_earned',COALESCE(kp.points_earned, 0)
-        ) ORDER BY l.order_index
-      ) FILTER (WHERE l.id IS NOT NULL),
-      '[]'
-    ) as lessons
-   FROM modules m
-   LEFT JOIN lessons l ON l.module_id = m.id
-   LEFT JOIN kid_progress kp 
-     ON kp.lesson_id = l.id 
-     AND kp.enrollment_id = $1
-   WHERE m.course_id = $2
-   GROUP BY m.id
-   ORDER BY m.order_index ASC`,
-  [enrollmentId, enrollment.course_id]
-);
+      `SELECT 
+        m.id,
+        m.title,
+        m.description,
+        m.order_index,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id',            l.id,
+              'title',         l.title,
+              'notes',         l.notes,
+              'assignment',    l.assignment,            -- ✨ NEW
+              'language',      l.language,
+              'starter_code',  l.starter_code,
+              'order_index',   l.order_index,
+              'completed',     COALESCE(kp.completed, false),
+              'points_earned', COALESCE(kp.points_earned, 0)
+            ) ORDER BY l.order_index
+          ) FILTER (WHERE l.id IS NOT NULL),
+          '[]'
+        ) as lessons
+       FROM modules m
+       LEFT JOIN lessons l ON l.module_id = m.id
+       LEFT JOIN kid_progress kp 
+         ON kp.lesson_id = l.id 
+         AND kp.enrollment_id = $1
+       WHERE m.course_id = $2
+       GROUP BY m.id
+       ORDER BY m.order_index ASC`,
+      [enrollmentId, enrollment.course_id]
+    );
 
     res.status(200).json({
       status: 'success',
@@ -144,11 +143,11 @@ export const getCourseContent = async (req: KidRequest, res: Response, next: Nex
 };
 
 /**
- * GET A SINGLE LESSON
+ * GET A SINGLE LESSON (already includes assignment via l.*)
  */
 export const getLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.user?.id; // ✅
+    const kidId = req.user?.id;
     const { enrollmentId, lessonId } = req.params;
 
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -202,12 +201,13 @@ export const getLesson = async (req: KidRequest, res: Response, next: NextFuncti
 };
 
 /**
- * SUBMIT LESSON SOLUTION AND EARN POINTS
+ * SUBMIT LESSON SOLUTION (for notes-only or auto-graded lessons)
+ * For coding/scratch lessons, use the separate /api/submissions endpoint
  */
 export const submitLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
-    const kidId = req.user?.id; // ✅
+    const kidId = req.user?.id;
     const { enrollmentId, lessonId } = req.params;
     const { code_submitted } = req.body;
 
@@ -229,7 +229,8 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
     const { course_id } = enrollmentResult.rows[0];
 
     const lessonResult = await client.query(
-      `SELECT l.id FROM lessons l
+      `SELECT l.id, l.lesson_type, l.assignment
+       FROM lessons l
        JOIN modules m ON m.id = l.module_id
        WHERE l.id = $1 AND m.course_id = $2`,
       [lessonId, course_id]
@@ -238,6 +239,17 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
     if (lessonResult.rows.length === 0) {
       await client.query('ROLLBACK');
       return next(new AppError('Lesson not found or does not belong to your course.', 404));
+    }
+
+    const lesson = lessonResult.rows[0];
+
+    // For coding/scratch lessons with an assignment, require GitHub submission via separate API
+    if ((lesson.lesson_type === 'coding' || lesson.lesson_type === 'scratch') && lesson.assignment) {
+      await client.query('ROLLBACK');
+      return next(new AppError(
+        'This lesson requires a GitHub repository submission. Please use the assignment submission form.',
+        400
+      ));
     }
 
     const existingProgress = await client.query(
@@ -298,7 +310,7 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
  */
 export const getDashboardStats = async (req: KidRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.user?.id; // ✅
+    const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     const kidResult = await pool.query(
@@ -405,7 +417,7 @@ export const getLeaderboard = async (req: KidRequest, res: Response, next: NextF
  */
 export const getAchievements = async (req: KidRequest, res: Response, next: NextFunction) => {
   try {
-    const kidId = req.user?.id; // ✅
+    const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     const result = await pool.query(

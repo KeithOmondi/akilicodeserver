@@ -106,10 +106,11 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
       title,
       lesson_type,      // 'notes' | 'coding' | 'scratch'
       notes,
+      assignment,       // ✨ NEW – coding task description
       language,
       starter_code,
       solution_code,
-      expected_output,  // used for auto-grading coding & scratch
+      expected_output,
       order_index,
     } = req.body;
 
@@ -120,6 +121,11 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
     const validTypes = ['notes', 'coding', 'scratch'];
     const type = lesson_type && validTypes.includes(lesson_type) ? lesson_type : 'notes';
 
+    // ✨ OPTIONAL: require assignment for coding/scratch lessons
+    if ((type === 'coding' || type === 'scratch') && !assignment) {
+      return next(new AppError(`Assignment description is required for ${type} lessons.`, 400));
+    }
+
     const moduleCheck = await pool.query('SELECT id FROM modules WHERE id = $1', [module_id]);
     if (moduleCheck.rows.length === 0) {
       return next(new AppError('Module not found.', 404));
@@ -127,19 +133,20 @@ export const createLesson = async (req: Request, res: Response, next: NextFuncti
 
     const result = await pool.query(
       `INSERT INTO lessons
-        (module_id, title, lesson_type, notes, language, starter_code, solution_code, expected_output, order_index)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        (module_id, title, lesson_type, notes, assignment, language, starter_code, solution_code, expected_output, order_index)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
       [
         module_id,
         title,
         type,
-        notes          ?? null,
-        language       ?? null,
-        starter_code   ?? null,
-        solution_code  ?? null,
+        notes ?? null,
+        assignment ?? null,   // ✨ NEW
+        language ?? null,
+        starter_code ?? null,
+        solution_code ?? null,
         expected_output ?? null,
-        order_index    ?? 0,
+        order_index ?? 0,
       ]
     );
 
@@ -172,7 +179,7 @@ export const getLessonById = async (req: Request, res: Response, next: NextFunct
   try {
     const { lessonId } = req.params;
 
-    // Fetch lesson with module info
+    // Fetch lesson with module info (includes assignment automatically)
     const lessonResult = await pool.query(
       `SELECT 
         l.*,
@@ -190,7 +197,7 @@ export const getLessonById = async (req: Request, res: Response, next: NextFunct
 
     const lesson = lessonResult.rows[0];
 
-    // Always fetch questions — frontend decides whether to show them
+    // Always fetch questions – frontend decides whether to show them
     const questionsResult = await pool.query(
       `SELECT id, question, options, answer, order_index
        FROM lesson_questions
@@ -220,6 +227,7 @@ export const updateLesson = async (req: Request, res: Response, next: NextFuncti
       title,
       lesson_type,
       notes,
+      assignment,       // ✨ NEW
       language,
       starter_code,
       solution_code,
@@ -236,22 +244,24 @@ export const updateLesson = async (req: Request, res: Response, next: NextFuncti
          title           = COALESCE($1, title),
          lesson_type     = COALESCE($2, lesson_type),
          notes           = COALESCE($3, notes),
-         language        = COALESCE($4, language),
-         starter_code    = COALESCE($5, starter_code),
-         solution_code   = COALESCE($6, solution_code),
-         expected_output = COALESCE($7, expected_output),
-         order_index     = COALESCE($8, order_index)
-       WHERE id = $9
+         assignment      = COALESCE($4, assignment),   -- ✨ NEW
+         language        = COALESCE($5, language),
+         starter_code    = COALESCE($6, starter_code),
+         solution_code   = COALESCE($7, solution_code),
+         expected_output = COALESCE($8, expected_output),
+         order_index     = COALESCE($9, order_index)
+       WHERE id = $10
        RETURNING *`,
       [
-        title          ?? null,
+        title ?? null,
         type,
-        notes          ?? null,
-        language       ?? null,
-        starter_code   ?? null,
-        solution_code  ?? null,
+        notes ?? null,
+        assignment ?? null,   // ✨ NEW
+        language ?? null,
+        starter_code ?? null,
+        solution_code ?? null,
         expected_output ?? null,
-        order_index    ?? null,
+        order_index ?? null,
         lessonId,
       ]
     );
@@ -285,10 +295,6 @@ export const deleteLesson = async (req: Request, res: Response, next: NextFuncti
 // ─── QUIZ QUESTIONS ───────────────────────────────────────────────────────────
 // Used for 'notes' lessons (quiz at end) and optionally 'scratch'/'coding' too.
 
-/**
- * POST /lessons/:lessonId/questions
- * Body: { question, options: string[], answer: number, order_index? }
- */
 export const addQuestion = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { lessonId } = req.params;
@@ -319,9 +325,6 @@ export const addQuestion = async (req: Request, res: Response, next: NextFunctio
   }
 };
 
-/**
- * GET /lessons/:lessonId/questions
- */
 export const getQuestions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { lessonId } = req.params;
@@ -344,10 +347,6 @@ export const getQuestions = async (req: Request, res: Response, next: NextFuncti
   }
 };
 
-/**
- * PATCH /lessons/questions/:questionId
- * Body: any subset of { question, options, answer, order_index }
- */
 export const updateQuestion = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { questionId } = req.params;
@@ -363,9 +362,9 @@ export const updateQuestion = async (req: Request, res: Response, next: NextFunc
        WHERE id = $5
        RETURNING *`,
       [
-        question    ?? null,
-        options     ? JSON.stringify(options) : null,
-        answer      ?? null,
+        question ?? null,
+        options ? JSON.stringify(options) : null,
+        answer ?? null,
         order_index ?? null,
         questionId,
       ]
@@ -381,9 +380,6 @@ export const updateQuestion = async (req: Request, res: Response, next: NextFunc
   }
 };
 
-/**
- * DELETE /lessons/questions/:questionId
- */
 export const deleteQuestion = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { questionId } = req.params;
@@ -419,7 +415,7 @@ export const getCourseCurriculum = async (req: Request, res: Response, next: Nex
       [courseId]
     );
 
-    // Fetch lessons with their question count so the sidebar can show indicators
+    // Fetch lessons with their question count (assignment is automatically included)
     const lessonsResult = await pool.query(
       `SELECT 
         l.*,
@@ -446,6 +442,67 @@ export const getCourseCurriculum = async (req: Request, res: Response, next: Nex
           modules,
         },
       },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+
+// ─── DEDICATED ASSIGNMENT ENDPOINTS (optional) ──────────────────────────────
+
+/**
+ * PATCH /lessons/:lessonId/assignment
+ * Body: { assignment: string }
+ * Updates only the assignment field of a lesson.
+ */
+export const updateLessonAssignment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { lessonId } = req.params;
+    const { assignment } = req.body;
+
+    if (!assignment) {
+      return next(new AppError('Please provide assignment text.', 400));
+    }
+
+    const result = await pool.query(
+      `UPDATE lessons SET assignment = $1 WHERE id = $2 RETURNING id, assignment`,
+      [assignment, lessonId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Lesson not found.', 404));
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { assignment: result.rows[0].assignment }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * GET /lessons/:lessonId/assignment
+ * Returns only the assignment text (useful for kid-facing UI).
+ */
+export const getLessonAssignment = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { lessonId } = req.params;
+
+    const result = await pool.query(
+      `SELECT assignment FROM lessons WHERE id = $1`,
+      [lessonId]
+    );
+
+    if (result.rows.length === 0) {
+      return next(new AppError('Lesson not found.', 404));
+    }
+
+    res.status(200).json({
+      status: 'success',
+      data: { assignment: result.rows[0].assignment || null }
     });
   } catch (error) {
     next(error);

@@ -13,7 +13,7 @@ import { isAuthenticated, isAuthorized } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// All kid routes require kid authentication
+// All kid routes require authentication
 router.use(isAuthenticated);
 
 // Dashboard
@@ -21,12 +21,15 @@ router.get('/dashboard', getDashboardStats);
 router.get('/leaderboard', getLeaderboard);
 router.get('/achievements', getAchievements);
 
-// Courses — entry point is enrollments now
+// Enrolled courses
 router.get('/courses', getMyCourses);
-router.get('/enrollments/:enrollmentId/content', isAuthorized("kid"), getCourseContent);
 
-// Lessons — scoped under enrollment
-router.get('/enrollments/:enrollmentId/lessons/:lessonId', getLesson);
-router.post('/enrollments/:enrollmentId/lessons/:lessonId/submit', submitLesson);
+// Course content (modules & lessons) for a specific enrollment
+// ✅ Changed from /enrollments/:enrollmentId/content to /courses/:enrollmentId/content
+router.get('/courses/:enrollmentId/content', isAuthorized('kid'), getCourseContent);
+
+// Single lesson details – also under /courses
+router.get('/courses/:enrollmentId/lessons/:lessonId', getLesson);
+router.post('/courses/:enrollmentId/lessons/:lessonId/submit', submitLesson);
 
 export default router;

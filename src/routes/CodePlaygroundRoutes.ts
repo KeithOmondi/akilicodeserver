@@ -1,69 +1,49 @@
 // src/routes/CodePlaygroundRoutes.ts
 
 import { Router } from 'express';
-import codePlaygroundController from '../controllers/CodePlaygroundController';
+import codeExecutionController from '../controllers/CodePlaygroundController'; // or your actual controller file
 import { isAuthenticated } from '../middleware/authMiddleware';
 
 const router = Router();
 
-// ==================== Snippet Routes ====================
-router.post('/snippets', isAuthenticated, codePlaygroundController.createSnippet.bind(codePlaygroundController));
-router.get('/snippets', isAuthenticated, codePlaygroundController.getUserSnippets.bind(codePlaygroundController));
-router.get('/snippets/:id', isAuthenticated, codePlaygroundController.getSnippet.bind(codePlaygroundController));
-router.put('/snippets/:id', isAuthenticated, codePlaygroundController.updateSnippet.bind(codePlaygroundController));
-router.delete('/snippets/:id', isAuthenticated, codePlaygroundController.deleteSnippet.bind(codePlaygroundController));
-router.post('/snippets/:id/favorite', isAuthenticated, codePlaygroundController.toggleFavorite.bind(codePlaygroundController));
+// ==================== Code Execution ====================
+// Main endpoint to execute code (supports javascript, python, html, css)
+router.post('/execute', isAuthenticated, codeExecutionController.executeCode.bind(codeExecutionController));
 
-// ==================== Code Execution Routes ====================
-router.post('/execute', isAuthenticated, codePlaygroundController.executeCode.bind(codePlaygroundController));
-router.get('/executions/:snippetId', isAuthenticated, codePlaygroundController.getExecutionHistory.bind(codePlaygroundController));
+// ==================== Docker & System Health ====================
+// Docker health check – useful for monitoring and debugging
+router.get('/docker/health', isAuthenticated, codeExecutionController.getDockerHealth.bind(codeExecutionController));
 
-// ==================== Session Routes ====================
-router.post('/session', codePlaygroundController.saveSession.bind(codePlaygroundController));
-router.get('/session', codePlaygroundController.getSession.bind(codePlaygroundController));
-
-// ==================== Search & Analytics Routes ====================
-router.get('/search', isAuthenticated, codePlaygroundController.searchSnippets.bind(codePlaygroundController));
-router.get('/stats', isAuthenticated, codePlaygroundController.getStats.bind(codePlaygroundController));
-
-// ==================== Share Routes ====================
-router.post('/snippets/:id/share', isAuthenticated, codePlaygroundController.generateShareLink.bind(codePlaygroundController));
-router.get('/shared/:token', codePlaygroundController.getSharedSnippet.bind(codePlaygroundController));
-
-// ==================== Docker & System Health Routes ====================
-// Docker health check - useful for monitoring and debugging
-router.get('/docker/health', isAuthenticated, codePlaygroundController.getDockerHealth.bind(codePlaygroundController));
-
-// Docker execution status - check if Docker is enabled
+// Execution system status – shows Docker availability, Node version, etc.
 router.get('/status', isAuthenticated, (req, res) => {
   res.json({
     success: true,
     data: {
       dockerEnabled: process.env.USE_DOCKER_EXECUTION === 'true',
       nodeVersion: process.version,
-      environment: process.env.NODE_ENV || 'development'
+      environment: process.env.NODE_ENV || 'development',
+      supportedLanguages: ['javascript', 'python', 'html', 'css']
     }
   });
 });
 
 // ==================== Admin Routes ====================
-// Kill all running executions - emergency stop
+// Emergency stop – kill all running executions (Docker + local)
 router.delete('/admin/executions/kill-all', 
   isAuthenticated, 
-  codePlaygroundController.killAllExecutions.bind(codePlaygroundController)
+  codeExecutionController.killAllExecutions.bind(codeExecutionController)
 );
 
-// Get Docker stats and active executions
+// Get detailed stats: active executions, Docker status
 router.get('/admin/docker/stats', 
   isAuthenticated, 
   async (req, res) => {
     try {
-      // Use the getDockerHealth method which handles null case
       const dockerEnabled = process.env.USE_DOCKER_EXECUTION === 'true';
       let activeExecutions = 0;
       
-      if (dockerEnabled && codePlaygroundController['dockerService']) {
-        activeExecutions = await codePlaygroundController['dockerService'].getActiveExecutions();
+      if (dockerEnabled && (codeExecutionController as any)['dockerService']) {
+        activeExecutions = await (codeExecutionController as any)['dockerService'].getActiveExecutions();
       }
       
       res.json({
@@ -83,15 +63,15 @@ router.get('/admin/docker/stats',
   }
 );
 
-// Clean up all Docker containers (maintenance)
+// Maintenance: force-clean all Docker containers (useful if stuck)
 router.post('/admin/docker/cleanup',
   isAuthenticated,
   async (req, res) => {
     try {
       const dockerEnabled = process.env.USE_DOCKER_EXECUTION === 'true';
       
-      if (dockerEnabled && codePlaygroundController['dockerService']) {
-        await codePlaygroundController['dockerService'].killAllExecutions();
+      if (dockerEnabled && (codeExecutionController as any)['dockerService']) {
+        await (codeExecutionController as any)['dockerService'].killAllExecutions();
         res.json({
           success: true,
           message: 'All Docker containers cleaned up successfully'

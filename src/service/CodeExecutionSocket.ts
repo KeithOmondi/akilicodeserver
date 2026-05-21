@@ -8,10 +8,14 @@ interface ActiveSession {
   executionId: string;
   socketId: string;
   container: any;
-  stdinStream: any;  // Store stdin stream
-  inputBuffer: string[];
-  waitingForInput: boolean;
+  stdinStream: any;
+  outputBuffer: string;
+  finished: boolean;
+  inputTimeoutHandle: NodeJS.Timeout | null;
 }
+
+const INPUT_RESPONSE_TIMEOUT_MS = 30_000;
+const TOTAL_EXECUTION_TIMEOUT_MS = 120_000;
 
 export class CodeExecutionSocket {
   private io: SocketServer;
@@ -21,13 +25,13 @@ export class CodeExecutionSocket {
   constructor(server: HttpServer) {
     this.io = new SocketServer(server, {
       cors: {
-        origin: process.env.FRONTEND_URL || 'http://localhost:3000',
-        credentials: true
-      }
+        origin: process.env.FRONTEND_URL || '',
+        credentials: true,
+      },
     });
-    
     this.dockerService = new DockerExecutionService();
     this.setupEventHandlers();
+    console.log('🔌 WebSocket server initialized (HTML/CSS/JS/Python)');
   }
 
   private setupEventHandlers() {
@@ -39,7 +43,11 @@ export class CodeExecutionSocket {
       });
 
       socket.on('input-response', (data: { executionId: string; input: string }) => {
-        this.handleInputResponse(data.executionId, data.input);
+        this.handleInputResponse(socket, data.executionId, data.input);
+      });
+
+      socket.on('kill-execution', (data: { executionId: string }) => {
+        this.cleanupContainer(data.executionId);
       });
 
       socket.on('disconnect', () => {
@@ -49,125 +57,250 @@ export class CodeExecutionSocket {
     });
   }
 
+  // Main entry point – decides between Docker, iframe render, or browser JS
   private async handleCodeExecution(socket: Socket, code: string, language: string) {
     const executionId = Math.random().toString(36).substring(7);
-    
-    try {
-      // Create a special container that supports input via stdin pipe
-      const { container, stdinStream } = await this.createInteractiveContainer(code, language, executionId);
+    console.log(`[Execution ${executionId}] Language: ${language}`);
+
+    // 1) HTML/CSS → render directly in frontend iframe
+    if (language === 'html' || language === 'css') {
+      socket.emit('html-render', {
+        executionId,
+        code: code,
+        language, // 'html' or 'css' – frontend can wrap in full document if needed
+      });
+      socket.emit('execution-complete', { executionId, exitCode: 0 });
+      console.log(`[Execution ${executionId}] HTML/CSS sent to frontend for rendering`);
+      return;
+    }
+
+    // 2) JavaScript – detect if it's a browser game (canvas, DOM, etc.)
+    if (language === 'javascript') {
+      const isBrowserGame = /(canvas|document\.|window\.|addEventListener|requestAnimationFrame)/i.test(code);
       
-      // Store session info
+      if (isBrowserGame) {
+        // Wrap code in a minimal HTML document and render in iframe
+        const fullHtml = `<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Game Preview</title></head>
+<body>
+<script>
+${code}
+</script>
+</body>
+</html>`;
+        socket.emit('html-render', {
+          executionId,
+          code: fullHtml,
+          language: 'html',
+        });
+        socket.emit('execution-complete', { executionId, exitCode: 0 });
+        console.log(`[Execution ${executionId}] JS detected as browser game → iframe render`);
+        return;
+      } else {
+        // Run in Node.js (Docker) for backend/text games
+        console.log(`[Execution ${executionId}] JS will run in Node.js Docker container`);
+        await this.runInDocker(socket, code, 'javascript', executionId);
+        return;
+      }
+    }
+
+    // 3) Python → run in Docker
+    if (language === 'python') {
+      await this.runInDocker(socket, code, 'python', executionId);
+      return;
+    }
+
+    // Unsupported language
+    socket.emit('execution-error', {
+      executionId,
+      error: `Unsupported language: ${language}. Only HTML, CSS, JavaScript, and Python are allowed.`,
+    });
+  }
+
+  // Shared Docker execution logic (Python or Node.js)
+  private async runInDocker(socket: Socket, code: string, language: string, executionId: string) {
+    let totalTimeoutHandle: NodeJS.Timeout | null = null;
+
+    try {
+      const { container, stdinStream } = await this.createInteractiveContainer(code, language, executionId);
+
       this.activeSessions.set(executionId, {
         executionId,
         socketId: socket.id,
         container,
-        stdinStream,  // Store the stdin stream for later use
-        inputBuffer: [],
-        waitingForInput: false
+        stdinStream,
+        outputBuffer: '',
+        finished: false,
+        inputTimeoutHandle: null,
       });
-      
-      // Start the container
-      await container.start();
-      
-      // Attach to container streams for output
-      const stream = await container.attach({
-        stream: true,
-        stdout: true,
-        stderr: true
-      });
-      
-      // Handle output streaming
-      stream.on('data', (chunk: Buffer) => {
-        let chunkStr = chunk.toString('utf8');
-        // Remove Docker's 8-byte header if present (type + size)
-        if (chunkStr.length > 8 && (chunkStr.charCodeAt(0) === 1 || chunkStr.charCodeAt(0) === 2)) {
-          chunkStr = chunkStr.substring(8);
-        }
-        
-        // Check if this is an input prompt
-        const isPrompt = chunkStr.includes('input') || 
-                        chunkStr.includes('Enter') || 
-                        chunkStr.includes('?') ||
-                        chunkStr.includes(':');
-        
+
+      totalTimeoutHandle = setTimeout(() => {
         const session = this.activeSessions.get(executionId);
-        if (session) {
-          if (isPrompt && !session.waitingForInput) {
-            // This is an input prompt - wait for user input
-            session.waitingForInput = true;
-            socket.emit('input-requested', {
-              executionId,
-              prompt: chunkStr
-            });
-          } else {
-            // Regular output
-            socket.emit('output', {
-              executionId,
-              output: chunkStr,
-              isError: false
-            });
-          }
+        if (session && !session.finished) {
+          socket.emit('execution-error', {
+            executionId,
+            error: `⏱ Execution exceeded the ${TOTAL_EXECUTION_TIMEOUT_MS / 1000}s total time limit.`,
+          });
+          this.cleanupContainer(executionId);
         }
-      });
-      
-      stream.on('error', (error) => {
-        console.error(`[Socket] Stream error for ${executionId}:`, error);
-        socket.emit('execution-error', {
-          executionId,
-          error: 'Stream error during execution'
+      }, TOTAL_EXECUTION_TIMEOUT_MS);
+
+      await container.start();
+      console.log(`[Execution ${executionId}] Container started`);
+
+      // Attach stdout/stderr with re‑attach logic
+      const attachOutputStream = async () => {
+        const session = this.activeSessions.get(executionId);
+        if (!session || session.finished) return;
+
+        const stream = await container.attach({
+          stream: true,
+          stdout: true,
+          stderr: true,
+          logs: false,
         });
-      });
-      
-      // Handle container exit
-      const exitCode = await container.wait();
-      socket.emit('execution-complete', {
-        executionId,
-        exitCode: exitCode.StatusCode
-      });
-      
-      // Cleanup
-      await this.cleanupContainer(executionId);
-      
-    } catch (error) {
-      console.error(`[Socket] Execution error for ${executionId}:`, error);
+
+        stream.on('data', (chunk: Buffer) => {
+          this.handleOutputChunk(socket, executionId, chunk);
+        });
+
+        stream.on('error', (err: Error) => {
+          console.error(`[Execution ${executionId}] Stream error:`, err);
+          socket.emit('execution-error', { executionId, error: err.message });
+        });
+
+        stream.on('end', async () => {
+          const s = this.activeSessions.get(executionId);
+          if (!s || s.finished) return;
+          try {
+            const info = await container.inspect();
+            if (info.State.Running) {
+              console.log(`[Execution ${executionId}] Re‑attaching to stream...`);
+              await attachOutputStream();
+            }
+          } catch {
+            // Container gone, ignore
+          }
+        });
+      };
+
+      await attachOutputStream();
+
+      // Wait for container exit
+      container.wait()
+        .then(async (exitData: { StatusCode: number }) => {
+          if (totalTimeoutHandle) clearTimeout(totalTimeoutHandle);
+          const session = this.activeSessions.get(executionId);
+          if (session && !session.finished) {
+            let actuallyExited = true;
+            try {
+              const info = await session.container.inspect();
+              actuallyExited = !info.State.Running;
+            } catch { /* container gone */ }
+            if (actuallyExited) {
+              console.log(`[Execution ${executionId}] Exited with code ${exitData.StatusCode}`);
+              setTimeout(() => {
+                socket.emit('execution-complete', { executionId, exitCode: exitData.StatusCode });
+                this.cleanupContainer(executionId);
+              }, 150);
+            }
+          }
+        })
+        .catch((err: Error) => {
+          if (totalTimeoutHandle) clearTimeout(totalTimeoutHandle);
+          console.error(`[Execution ${executionId}] Wait error:`, err);
+          socket.emit('execution-error', { executionId, error: err.message });
+          this.cleanupContainer(executionId);
+        });
+    } catch (error: any) {
+      if (totalTimeoutHandle) clearTimeout(totalTimeoutHandle);
+      console.error(`[Execution ${executionId}] Fatal error:`, error);
       socket.emit('execution-error', {
         executionId,
-        error: error instanceof Error ? error.message : 'Execution failed'
+        error: error.message || 'Execution failed',
       });
       await this.cleanupContainer(executionId);
     }
   }
 
-  private handleInputResponse(executionId: string, input: string) {
+  private handleOutputChunk(socket: Socket, executionId: string, chunk: Buffer) {
     const session = this.activeSessions.get(executionId);
-    if (session && session.waitingForInput && session.stdinStream) {
-      try {
-        // Use the stored stdin stream
-        session.stdinStream.write(input + '\n');
-        session.waitingForInput = false;
-      } catch (error) {
-        console.error(`[Socket] Failed to send input to ${executionId}:`, error);
-      }
+    if (!session || session.finished) return;
+
+    // Strip Docker multiplex header (8 bytes) if present
+    let text: string;
+    let isError = false;
+    if (chunk.length > 8 && (chunk[0] === 1 || chunk[0] === 2)) {
+      isError = chunk[0] === 2;
+      text = chunk.subarray(8).toString('utf8');
+    } else {
+      text = chunk.toString('utf8');
+    }
+    if (!text) return;
+
+    session.outputBuffer += text;
+    console.log(`[Execution ${executionId}] Output: ${text.replace(/\n/g, '\\n')}`);
+    socket.emit('output', { executionId, output: text, isError });
+
+    // Reset input timeout (Python input() detection)
+    this.scheduleInputTimeout(socket, executionId);
+  }
+
+  private scheduleInputTimeout(socket: Socket, executionId: string) {
+    const session = this.activeSessions.get(executionId);
+    if (!session || session.finished) return;
+    if (session.inputTimeoutHandle) clearTimeout(session.inputTimeoutHandle);
+    session.inputTimeoutHandle = setTimeout(() => {
+      const s = this.activeSessions.get(executionId);
+      if (!s || s.finished) return;
+      socket.emit('output', {
+        executionId,
+        output: '\n⚠ Execution timeout – no response after input\n',
+        isError: true,
+      });
+      socket.emit('execution-complete', { executionId, exitCode: 1 });
+      this.cleanupContainer(executionId);
+    }, INPUT_RESPONSE_TIMEOUT_MS);
+  }
+
+  private handleInputResponse(socket: Socket, executionId: string, input: string) {
+    const session = this.activeSessions.get(executionId);
+    if (!session || session.finished) {
+      console.warn(`[Execution ${executionId}] No active session for input`);
+      return;
+    }
+    if (session.inputTimeoutHandle) {
+      clearTimeout(session.inputTimeoutHandle);
+      session.inputTimeoutHandle = null;
+    }
+    console.log(`[Execution ${executionId}] Sending input: "${input}"`);
+    socket.emit('output', { executionId, output: input + '\n', isError: false, isEcho: true });
+    try {
+      session.stdinStream.write(input + '\n');
+    } catch (err) {
+      console.error(`[Execution ${executionId}] Failed to write to stdin:`, err);
+      socket.emit('execution-error', { executionId, error: 'Failed to send input to process' });
     }
   }
 
   private async createInteractiveContainer(code: string, language: string, executionId: string) {
-    // Create temp directory if it doesn't exist
     const tempDir = path.join(process.cwd(), 'temp');
     await fs.mkdir(tempDir, { recursive: true });
-    
-    // Determine file extension based on language
-    const extension = this.getFileExtension(language);
+    const extension = language === 'python' ? 'py' : 'js';
     const fileName = `code_${executionId}.${extension}`;
     const filePath = path.join(tempDir, fileName);
-    
-    // Write code to file
     await fs.writeFile(filePath, code, 'utf-8');
-    
-    // Get Docker configuration based on language
-    const { image, cmd } = this.getDockerConfig(language, fileName);
-    
-    // Create container with stdin support
+
+    let image: string, cmd: string[];
+    if (language === 'python') {
+      image = 'python:3.11-alpine';
+      cmd = ['python', '-u', `/app/${fileName}`];
+    } else { // javascript
+      image = 'node:18-alpine';
+      cmd = ['node', `/app/${fileName}`];
+    }
+
     const container = await this.dockerService['docker'].createContainer({
       Image: image,
       Cmd: cmd,
@@ -176,124 +309,60 @@ export class CodeExecutionSocket {
       AttachStdin: true,
       OpenStdin: true,
       StdinOnce: false,
+      Tty: false,
       HostConfig: {
         Binds: [`${filePath}:/app/${fileName}:ro`],
-        Memory: 128 * 1024 * 1024, // 128MB
-        NanoCpus: 0.5 * 1e9, // 0.5 CPU core
+        Memory: 128 * 1024 * 1024,
+        MemorySwap: 128 * 1024 * 1024,
+        NanoCpus: Math.floor(0.5 * 1e9),
         ReadonlyRootfs: false,
-        Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=64M' }
+        SecurityOpt: ['no-new-privileges:true'],
+        CapDrop: ['ALL'],
+        NetworkMode: 'none',
+        PidsLimit: 64,
+        Tmpfs: { '/tmp': 'rw,noexec,nosuid,size=64M' },
       },
-      WorkingDir: '/app'
+      WorkingDir: '/app',
+      Env: language === 'python'
+        ? ['PYTHONUNBUFFERED=1', 'PYTHONIOENCODING=utf-8', 'PYTHONDONTWRITEBYTECODE=1']
+        : [], // Node.js doesn't need special env for unbuffered
     });
-    
-    // Attach to stdin BEFORE starting the container
-    const stdinStream = await container.attach({
-      stream: true,
-      stdin: true
-    });
-    
-    // Store file path for cleanup
+
+    const stdinStream = await container.attach({ stream: true, stdin: true, stdout: false, stderr: false });
     (container as any).codeFilePath = filePath;
-    
     return { container, stdinStream };
-  }
-
-  private getFileExtension(language: string): string {
-    const extensions: Record<string, string> = {
-      javascript: 'js',
-      python: 'py',
-      html: 'html',
-      css: 'css',
-      cpp: 'cpp',
-      c: 'c',
-      java: 'java',
-      typescript: 'ts'
-    };
-    return extensions[language] || 'txt';
-  }
-
-  private getDockerConfig(language: string, fileName: string): { image: string; cmd: string[] } {
-    const configs: Record<string, { image: string; cmd: string[] }> = {
-      python: {
-        image: 'python:3.11-alpine',
-        cmd: ['python', '-u', `/app/${fileName}`] // -u for unbuffered output
-      },
-      javascript: {
-        image: 'node:18-alpine',
-        cmd: ['node', `/app/${fileName}`]
-      },
-      html: {
-        image: 'alpine:latest',
-        cmd: ['cat', `/app/${fileName}`]
-      },
-      css: {
-        image: 'alpine:latest',
-        cmd: ['cat', `/app/${fileName}`]
-      },
-      cpp: {
-        image: 'gcc:latest',
-        cmd: ['sh', '-c', `g++ /app/${fileName} -o /tmp/program && /tmp/program`]
-      },
-      c: {
-        image: 'gcc:latest',
-        cmd: ['sh', '-c', `gcc /app/${fileName} -o /tmp/program && /tmp/program`]
-      },
-      java: {
-        image: 'eclipse-temurin:17-jdk-alpine',
-        cmd: ['sh', '-c', `javac /app/${fileName} && java -cp /app Main`]
-      },
-      typescript: {
-        image: 'node:18-alpine',
-        cmd: ['sh', '-c', `npm install -g typescript && tsc /app/${fileName} --outDir /tmp && node /tmp/${fileName.replace('.ts', '.js')}`]
-      }
-    };
-    
-    return configs[language] || configs.python;
   }
 
   private async cleanupContainer(executionId: string) {
     const session = this.activeSessions.get(executionId);
-    if (session) {
-      try {
-        // Close stdin stream
-        if (session.stdinStream) {
-          try {
-            session.stdinStream.end();
-          } catch (e) {}
-        }
-        // Stop container if still running
-        await session.container.stop().catch(() => {});
-        // Remove container
-        await session.container.remove({ force: true }).catch(() => {});
-        // Remove temp file
-        if ((session.container as any).codeFilePath) {
-          await fs.unlink((session.container as any).codeFilePath).catch(() => {});
-        }
-      } catch (error) {
-        console.error(`Failed to cleanup container ${executionId}:`, error);
-      } finally {
-        this.activeSessions.delete(executionId);
+    if (!session) return;
+    session.finished = true;
+    if (session.inputTimeoutHandle) clearTimeout(session.inputTimeoutHandle);
+    try {
+      if (session.stdinStream) session.stdinStream.end();
+      await session.container.stop({ t: 2 }).catch(() => {});
+      await session.container.remove({ force: true }).catch(() => {});
+      if ((session.container as any).codeFilePath) {
+        await fs.unlink((session.container as any).codeFilePath).catch(() => {});
       }
+    } catch (err) {
+      console.error(`[Execution ${executionId}] Cleanup error:`, err);
+    } finally {
+      this.activeSessions.delete(executionId);
+      console.log(`[Execution ${executionId}] Cleaned up`);
     }
   }
 
   private cleanupSessionsForSocket(socketId: string) {
-    for (const [executionId, session] of this.activeSessions) {
-      if (session.socketId === socketId) {
-        this.cleanupContainer(executionId);
-      }
+    for (const [execId, session] of this.activeSessions) {
+      if (session.socketId === socketId) this.cleanupContainer(execId);
     }
   }
 
-  // Public method for graceful shutdown
   public async cleanup(): Promise<void> {
     console.log('🧹 Cleaning up all WebSocket sessions...');
-    const executionIds = Array.from(this.activeSessions.keys());
-    for (const executionId of executionIds) {
-      await this.cleanupContainer(executionId);
-    }
-    if (this.io) {
-      this.io.close();
-    }
+    const ids = Array.from(this.activeSessions.keys());
+    for (const id of ids) await this.cleanupContainer(id);
+    if (this.io) this.io.close();
   }
 }

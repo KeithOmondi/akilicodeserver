@@ -18,6 +18,9 @@ import testimonialRoutes from "./routes/testimonialRoutes"
 import kidLearningRoutes from "./routes/kidLearningRoutes"
 import codePlaygroundRoutes from "./routes/CodePlaygroundRoutes"
 import pricingRoutes from './routes/pricingRoutes';
+import userRoutes from "./routes/userRoutes"
+import submissionRoutes from './routes/submissionRoutes';
+import kidCalendarRoutes from './routes/kidCalendarRoutes';
 
 const app: Application = express();
 
@@ -44,6 +47,7 @@ app.get('/', (req, res) => {
 });
 
 app.use('/api/v1/auth', authRoutes);
+app.use('/api/v1/admin/users', userRoutes);
 app.use('/api/v1/kids', kidRoutes);
 app.use('/api/v1/enrollments', enrollmentRoutes);
 app.use('/api/v1/payments', paymentRoutes);
@@ -55,6 +59,8 @@ app.use('/api/v1/testimonials', testimonialRoutes)
 app.use("/api/v1/learning", kidLearningRoutes)
 app.use("/api/v1/playground", codePlaygroundRoutes)
 app.use('/api/v1/pricing', pricingRoutes);
+app.use('/api/v1/submissions', submissionRoutes);
+app.use('/api/v1/kid/calendar', kidCalendarRoutes);
 
 app.use(notFound);
 app.use(globalErrorHandler);

@@ -15,8 +15,12 @@ import {
   getQuestions,
   updateQuestion,
   deleteQuestion,
+  // ✨ NEW assignment helpers
+  getLessonAssignment,
+  updateLessonAssignment,
 } from '../controllers/lessonController';
 import { isAuthenticated, isAuthorized } from '../middleware/authMiddleware';
+import { getAllSubmissions, getMySubmissions, getSubmissionByLesson, getSubmissionsByLesson, reviewSubmission, submitAssignment } from '../controllers/submissionController';
 
 const router = Router();
 
@@ -44,6 +48,20 @@ router.post(  '/lessons/create',            isAuthenticated, isAuthorized('admin
 router.patch( '/lessons/:lessonId',         isAuthenticated, isAuthorized('admin'),                  updateLesson);
 router.delete('/lessons/:lessonId',         isAuthenticated, isAuthorized('admin'),                  deleteLesson);
 
+// ✨ NEW ASSIGNMENT‑ONLY ROUTES (optional but convenient)
+// Kid/parent can fetch just the assignment text without full lesson details
+router.get(
+  '/lessons/:lessonId/assignment',
+  isAuthenticated, isAuthorized('parent', 'admin', 'kid'),
+  getLessonAssignment
+);
+// Admin/tutor can update only the assignment field
+router.patch(
+  '/lessons/:lessonId/assignment',
+  isAuthenticated, isAuthorized('admin'),
+  updateLessonAssignment
+);
+
 // ─── QUIZ QUESTIONS ───────────────────────────────────────────────────────────
 // Kids need GET access to questions; only admin can author them
 
@@ -51,5 +69,7 @@ router.get(   '/lessons/:lessonId/questions',   isAuthenticated, isAuthorized('p
 router.post(  '/lessons/:lessonId/questions',   isAuthenticated, isAuthorized('admin'),                  addQuestion);
 router.patch( '/lessons/questions/:questionId', isAuthenticated, isAuthorized('admin'),                  updateQuestion);
 router.delete('/lessons/questions/:questionId', isAuthenticated, isAuthorized('admin'),                  deleteQuestion);
+
+
 
 export default router;
