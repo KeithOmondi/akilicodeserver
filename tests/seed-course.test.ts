@@ -1,0 +1,65 @@
+/** The starter-content seeder, run against an in-process Postgres loaded with the real schema. */
+import './setup';
+import test, { before } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { seedCourse, check } = require('../scripts/lib/seed-course');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const content = require('../content/programming');
+
+let db: any;
+const client = () => ({ query: async (sql: string, p?: any[]) => { const r = await db.query(sql, p); return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length }; } });
+
+before(async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const { uuid_ossp } = await import('@electric-sql/pglite/contrib/uuid_ossp');
+  db = new PGlite({ extensions: { uuid_ossp } });
+  const schema = fs.readFileSync(path.join(__dirname, '../schema/schema.sql'), 'utf8').replace(/CREATE EXTENSION IF NOT EXISTS pgcrypto;/, '');
+  await db.exec(schema);
+});
+
+test('the Programming content is valid: 5 lessons, 10 questions, every answer points at a real option', () => {
+  assert.deepEqual(check(content), []);
+  assert.equal(content.lessons.length, 5);
+  assert.equal(content.lessons.reduce((n: number, l: any) => n + l.questions.length, 0), 10);
+  assert.ok(content.lessons.every((l: any) => l.questions.length === 2 && l.assignment));
+  // answers are spread around, not always the same position
+  assert.ok(new Set(content.lessons.flatMap((l: any) => l.questions.map((q: any) => q.answer))).size >= 3);
+});
+
+test('notes avoid more than one bullet list (the lesson page renderer merges lists)', () => {
+  for (const l of content.lessons) assert.ok((l.notes.match(/^- /gm) || []).length === 0, l.title);
+});
+
+test('without the course, nothing is created and the reason is clear', async () => {
+  const r = await seedCourse(client(), content, { apply: true });
+  assert.equal(r.ok, false);
+  assert.match(r.problems[0], /Create it in Admin/);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM modules')).rows[0].n, 0);
+});
+
+test('preview writes nothing; apply writes once; a second run changes nothing', async () => {
+  await db.query(`INSERT INTO courses (title, description, price) VALUES ('Programming','x',100)`);
+  const preview = await seedCourse(client(), content);
+  assert.equal(preview.ok, true);
+  assert.equal(preview.applied, false);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM lessons')).rows[0].n, 0);
+
+  const done = await seedCourse(client(), content, { apply: true });
+  assert.equal(done.applied, true);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM lessons')).rows[0].n, 5);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM lesson_questions')).rows[0].n, 10);
+  assert.equal((await db.query(`SELECT count(*)::int AS n FROM lessons WHERE assignment IS NOT NULL`)).rows[0].n, 5);
+
+  const again = await seedCourse(client(), content, { apply: true });
+  assert.equal(again.skipped, true);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM lessons')).rows[0].n, 5);
+});
+
+test('seeded questions grade correctly with the real answer index', async () => {
+  const q = (await db.query(`SELECT options, answer FROM lesson_questions LIMIT 1`)).rows[0];
+  assert.ok(Array.isArray(q.options) && q.options.length === 4 && q.answer >= 0 && q.answer < 4);
+});
