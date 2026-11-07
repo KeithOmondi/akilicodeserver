@@ -1,9 +1,12 @@
 import { z } from 'zod';
 import { uuid } from './common';
+import { AGE_GROUP_IDS } from '../utils/ageGroups';
 
 const optText = (max: number) => z.string().trim().max(max).optional().nullable();
 const orderIndex = z.coerce.number().int().min(0).max(10000);
 const money = z.coerce.number().min(0).max(1_000_000);
+/** Which age groups something is for. An empty list (or none) means every group. */
+const ageGroups = z.array(z.enum(AGE_GROUP_IDS)).max(5).optional();
 
 // ── Courses, modules, lessons, questions ─────────────────────────────────────
 
@@ -14,6 +17,9 @@ export const createCourseSchema = z.object({
   duration: optText(50),
   category: optText(100),
   image_url: z.string().trim().url().max(1000).optional().nullable().or(z.literal('')),
+  age_groups: ageGroups,
+  /** Where this course sits in the learning path (1 = start here). */
+  path_order: z.coerce.number().int().min(0).max(100).optional(),
 });
 
 export const updateCourseSchema = createCourseSchema.partial().extend({ is_active: z.boolean().optional() })
@@ -33,6 +39,9 @@ export const createLessonSchema = z.object({
   notes: z.string().max(100000).optional().nullable(),
   assignment: z.string().max(20000).optional().nullable(),
   order_index: orderIndex.optional(),
+  /** 'notes' = reading + quiz, 'coding' = HTML/CSS/JS in the editor, 'scratch' = block coding. */
+  lesson_type: z.enum(['notes', 'coding', 'scratch']).optional(),
+  age_groups: ageGroups,
 });
 export const updateLessonSchema = createLessonSchema.omit({ module_id: true }).partial();
 export const updateAssignmentSchema = z.object({ assignment: z.string().max(20000).nullable() });

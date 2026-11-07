@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { uuid } from './common';
+import { AGE_GROUP_IDS } from '../utils/ageGroups';
 
 const username = z
   .string()
@@ -30,6 +31,8 @@ export const registerKidSchema = z.object({
   birth_year: z.coerce.number().int().min(thisYear - 20).max(thisYear).optional().nullable(),
   grade: z.string().trim().max(50).optional().nullable(),
   avatar: z.string().trim().max(100).optional().nullable(),
+  /** Chosen from a dropdown; if left out it is worked out from the age. */
+  age_group: z.enum(AGE_GROUP_IDS).optional(),
   consent: consentSchema,
 });
 
@@ -38,6 +41,7 @@ export const consentForExistingKidSchema = z.object({ consent: consentSchema });
 export const updateKidSchema = z.object({
   name: z.string().trim().min(1).max(40).optional(),
   age: z.coerce.number().int().min(3).max(19).optional(),
+  age_group: z.enum(AGE_GROUP_IDS).optional(),
   grade: z.string().trim().max(50).optional().nullable(),
   avatar: z.string().trim().max(100).optional().nullable(),
 });

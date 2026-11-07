@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
+import { ageGroupOf } from '../utils/ageGroups';
 import bcrypt from 'bcryptjs';
 import { sendToken } from '../utils/sendToken';
 
@@ -18,7 +19,7 @@ export const getKidById = async (req: Request, res: Response, next: NextFunction
     const { kidId } = req.params;
 
     const result = await pool.query(
-      `SELECT id, parent_id, name, age, grade, avatar, username,
+      `SELECT id, parent_id, name, age, age_group, grade, avatar, username,
               CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin,
               created_at
        FROM kids
@@ -162,7 +163,9 @@ export const updateKid = async (req: Request, res: Response, next: NextFunction)
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
 
     const { kidId } = req.params;
-    const { name, age, grade, avatar } = req.body;
+    const { name, age, grade, avatar, age_group } = req.body;
+    // A new age moves the child to that age's group, unless the parent chose a group themselves.
+    const group = age_group ?? (age !== undefined ? ageGroupOf(Number(age)) : null);
 
     const result = await pool.query(
       `UPDATE kids
@@ -170,12 +173,13 @@ export const updateKid = async (req: Request, res: Response, next: NextFunction)
          name   = COALESCE($1, name),
          age    = COALESCE($2, age),
          grade  = COALESCE($3, grade),
-         avatar = COALESCE($4, avatar)
+         avatar = COALESCE($4, avatar),
+         age_group = COALESCE($7, age_group)
        WHERE id = $5 AND parent_id = $6
-       RETURNING id, parent_id, name, age, grade, avatar, username,
+       RETURNING id, parent_id, name, age, age_group, grade, avatar, username,
                  CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin,
                  created_at`,
-      [name ?? null, age ?? null, grade ?? null, avatar ?? null, kidId, parentId]
+      [name ?? null, age ?? null, grade ?? null, avatar ?? null, kidId, parentId, group]
     );
 
     if (result.rows.length === 0) {
@@ -201,7 +205,7 @@ export const getKidMe = async (req: Request, res: Response, next: NextFunction) 
     if (!kidId) return next(new AppError('Unauthorized.', 401));
 
     const result = await pool.query(
-      `SELECT id, parent_id, name, age, grade, avatar, username,
+      `SELECT id, parent_id, name, age, age_group, grade, avatar, username,
               CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin,
               created_at
        FROM kids WHERE id = $1`,

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
+import { lessonVisibleSql } from '../utils/ageGroups';
 
 export const getMyCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -27,7 +28,7 @@ export const getMyCourses = async (req: Request, res: Response, next: NextFuncti
           SELECT COUNT(*)::int 
           FROM lessons l
           JOIN modules m ON m.id = l.module_id
-          WHERE m.course_id = e.course_id
+          WHERE m.course_id = e.course_id AND ${lessonVisibleSql('l', 1)}
         ) as total_lessons
        FROM enrollments e
        LEFT JOIN courses c ON c.id = e.course_id
@@ -106,14 +107,14 @@ export const getCourseContent = async (req: Request, res: Response, next: NextFu
           '[]'
         ) as lessons
        FROM modules m
-       LEFT JOIN lessons l ON l.module_id = m.id
+       LEFT JOIN lessons l ON l.module_id = m.id AND ${lessonVisibleSql('l', 3)}
        LEFT JOIN kid_progress kp 
          ON kp.lesson_id = l.id 
          AND kp.enrollment_id = $1
        WHERE m.course_id = $2
        GROUP BY m.id
        ORDER BY m.order_index ASC`,
-      [enrollmentId, enrollment.course_id]
+      [enrollmentId, enrollment.course_id, kidId]
     );
 
     res.status(200).json({
@@ -151,8 +152,8 @@ export const getLesson = async (req: Request, res: Response, next: NextFunction)
       `SELECT l.*
        FROM lessons l
        JOIN modules m ON m.id = l.module_id
-       WHERE l.id = $1 AND m.course_id = $2`,
-      [lessonId, course_id]
+       WHERE l.id = $1 AND m.course_id = $2 AND ${lessonVisibleSql('l', 3)}`,
+      [lessonId, course_id, kidId]
     );
 
     if (lessonResult.rows.length === 0) {
@@ -303,7 +304,7 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
           FROM lessons l
           JOIN modules m ON m.id = l.module_id
           JOIN enrollments e2 ON e2.course_id = m.course_id
-          WHERE e2.kid_id = $1 AND e2.status = 'active'
+          WHERE e2.kid_id = $1 AND e2.status = 'active' AND ${lessonVisibleSql('l', 1)}
         ) as total_lessons
        FROM enrollments e
        LEFT JOIN kid_progress kp ON kp.enrollment_id = e.id AND kp.completed = true

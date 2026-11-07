@@ -5,6 +5,7 @@ import env from '../config/env';
 import { AppError } from '../utils/appError';
 import jwt from 'jsonwebtoken';
 import { sendToken, KID_COOKIE, KID_COOKIE_PATH } from '../utils/sendToken';
+import { ageGroupOf } from '../utils/ageGroups';
 import { checkKidPin, KidLoginRow } from '../services/kidAccess';
 import { CONSENT_ITEMS, CONSENT_VERSION, consentDocument } from '../services/consent';
 import { getScreenTimeStatus, getWeeklyUsage, recordHeartbeat } from '../services/screenTime';
@@ -17,7 +18,7 @@ const parentIdOf = (req: Request) => {
   return id;
 };
 
-const KID_PUBLIC = `id, parent_id, name, age, birth_year, grade, avatar, username,
+const KID_PUBLIC = `id, parent_id, name, age, age_group, birth_year, grade, avatar, username,
   CASE WHEN pin_hash IS NOT NULL THEN true ELSE false END AS has_pin,
   screen_time_daily_minutes, break_every_minutes, created_at`;
 
@@ -51,7 +52,7 @@ export const registerKid = async (req: Request, res: Response, next: NextFunctio
   const client = await pool.connect();
   try {
     const parentId = parentIdOf(req);
-    const { name, age, birth_year, grade, avatar, consent } = req.body;
+    const { name, age, birth_year, grade, avatar, consent, age_group } = req.body;
 
     if (consent.version !== CONSENT_VERSION) {
       return next(new AppError('The consent text has been updated. Please read and accept it again.', 409));
@@ -62,9 +63,9 @@ export const registerKid = async (req: Request, res: Response, next: NextFunctio
 
     await client.query('BEGIN');
     const kid = await client.query(
-      `INSERT INTO kids (parent_id, name, age, birth_year, grade, avatar)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${KID_PUBLIC}`,
-      [parentId, name, age, birth_year ?? null, grade ?? null, avatar ?? null]
+      `INSERT INTO kids (parent_id, name, age, age_group, birth_year, grade, avatar)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING ${KID_PUBLIC}`,
+      [parentId, name, age, age_group ?? ageGroupOf(age), birth_year ?? null, grade ?? null, avatar ?? null]
     );
     await insertConsent(client, parentId, kid.rows[0].id, req);
     await client.query('COMMIT');

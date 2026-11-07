@@ -8,16 +8,16 @@ import { AppError } from '../utils/appError';
 
 export const createCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { title, description, price, duration, category, image_url } = req.body;
+    const { title, description, price, duration, category, image_url, age_groups, path_order } = req.body;
 
     if (!title || !price) {
       return next(new AppError('Please provide title, price, and duration.', 400));
     }
 
     const result = await pool.query(
-      `INSERT INTO courses (title, description, price, duration, category, image_url)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-      [title, description ?? null, price, duration ?? null, category ?? null, image_url ?? null]
+      `INSERT INTO courses (title, description, price, duration, category, image_url, age_groups, path_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      [title, description ?? null, price, duration ?? null, category ?? null, image_url ?? null, age_groups?.length ? age_groups : null, path_order ?? 0]
     );
 
     res.status(201).json({ status: 'success', data: { course: result.rows[0] } });
@@ -32,12 +32,13 @@ export const createCourse = async (req: Request, res: Response, next: NextFuncti
  */
 export const updateCourse = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const allowed = ['title', 'description', 'price', 'duration', 'category', 'image_url', 'is_active'] as const;
+    const allowed = ['title', 'description', 'price', 'duration', 'category', 'image_url', 'is_active', 'age_groups', 'path_order'] as const;
     const sets: string[] = [];
     const values: unknown[] = [];
     for (const col of allowed) {
       if (req.body[col] !== undefined) {
-        values.push(req.body[col] === '' ? null : req.body[col]);
+        const v = req.body[col];
+        values.push(v === '' || (Array.isArray(v) && v.length === 0) ? null : v); // an empty list of groups means "everyone"
         sets.push(`${col} = $${values.length}`);
       }
     }
@@ -128,16 +129,16 @@ export const deleteModule = async (req: Request, res: Response, next: NextFuncti
 
 export const createLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { module_id, title, notes, assignment, order_index } = req.body;
+    const { module_id, title, notes, assignment, order_index, lesson_type, age_groups } = req.body;
     if (!module_id || !title) return next(new AppError('Please provide module_id and title.', 400));
 
     const moduleCheck = await pool.query('SELECT id FROM modules WHERE id = $1', [module_id]);
     if (moduleCheck.rows.length === 0) return next(new AppError('Module not found.', 404));
 
     const result = await pool.query(
-      `INSERT INTO lessons (module_id, title, notes, assignment, order_index)
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-      [module_id, title, notes ?? null, assignment ?? null, order_index ?? 0]
+      `INSERT INTO lessons (module_id, title, notes, assignment, order_index, lesson_type, age_groups)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [module_id, title, notes ?? null, assignment ?? null, order_index ?? 0, lesson_type ?? 'notes', age_groups?.length ? age_groups : null]
     );
     res.status(201).json({ status: 'success', data: { lesson: result.rows[0] } });
   } catch (error) { next(error); }
@@ -193,15 +194,18 @@ export const getLessonById = async (req: Request, res: Response, next: NextFunct
 export const updateLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { lessonId } = req.params;
-    const { title, notes, assignment, order_index } = req.body;
+    const { title, notes, assignment, order_index, lesson_type, age_groups } = req.body;
+    const setGroups = age_groups !== undefined; // [] = "everyone", so it must be distinguishable from "not sent"
     const result = await pool.query(
       `UPDATE lessons
        SET title = COALESCE($1, title),
            notes = COALESCE($2, notes),
            assignment = COALESCE($3, assignment),
-           order_index = COALESCE($4, order_index)
+           order_index = COALESCE($4, order_index),
+           lesson_type = COALESCE($6, lesson_type),
+           age_groups = CASE WHEN $7::boolean THEN $8::text[] ELSE age_groups END
        WHERE id = $5 RETURNING *`,
-      [title ?? null, notes ?? null, assignment ?? null, order_index ?? null, lessonId]
+      [title ?? null, notes ?? null, assignment ?? null, order_index ?? null, lessonId, lesson_type ?? null, setGroups, setGroups && age_groups.length ? age_groups : null]
     );
     if (result.rows.length === 0) return next(new AppError('Lesson not found.', 404));
     res.status(200).json({ status: 'success', data: { lesson: result.rows[0] } });

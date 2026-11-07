@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
+import { lessonVisibleSql } from '../utils/ageGroups';
 
 const MAX_PROJECTS_PER_KID = 25;
 
@@ -12,7 +13,7 @@ export const STARTER = {
 };
 
 const kidId = (req: Request) => req.user!.id;
-const LIST_COLS = 'id, title, lesson_id, submitted_at, marks, reviewed_at, updated_at';
+const LIST_COLS = 'id, title, kind, lesson_id, submitted_at, marks, reviewed_at, updated_at';
 
 const ownProject = async (id: string, kid: string) => {
   const { rows } = await pool.query('SELECT * FROM kid_projects WHERE id = $1 AND kid_id = $2', [id, kid]);
@@ -26,7 +27,7 @@ const ownProject = async (id: string, kid: string) => {
 export const listAssignments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { rows } = await pool.query(
-      `SELECT l.id AS lesson_id, l.title AS lesson_title, l.assignment, l.assignment_due_date,
+      `SELECT l.id AS lesson_id, l.title AS lesson_title, l.assignment, l.assignment_due_date, l.lesson_type,
               c.title AS course_title, e.id AS enrollment_id, m.title AS module_title,
               p.id AS project_id, p.submitted_at, p.reviewed_at, p.marks, p.feedback
          FROM enrollments e
@@ -35,6 +36,7 @@ export const listAssignments = async (req: Request, res: Response, next: NextFun
          JOIN lessons l  ON l.module_id = m.id
          LEFT JOIN kid_projects p ON p.kid_id = e.kid_id AND p.lesson_id = l.id
         WHERE e.kid_id = $1 AND e.status = 'active' AND l.assignment IS NOT NULL AND l.assignment <> ''
+          AND ${lessonVisibleSql('l', 1)}
         ORDER BY c.title, m.order_index, l.order_index`,
       [kidId(req)]
     );
@@ -79,10 +81,11 @@ export const createProject = async (req: Request, res: Response, next: NextFunct
     if (count.rows[0].n >= MAX_PROJECTS_PER_KID) {
       return next(new AppError(`You can keep ${MAX_PROJECTS_PER_KID} projects. Delete one you do not need, then try again.`, 409));
     }
-    const { title, html, css, js } = req.body as { title?: string; html?: string; css?: string; js?: string };
+    const { title, html, css, js, kind, blocks } = req.body as { title?: string; html?: string; css?: string; js?: string; kind?: 'web' | 'blocks'; blocks?: object };
+    const isBlocks = kind === 'blocks';
     const { rows } = await pool.query(
-      `INSERT INTO kid_projects (kid_id, title, html, css, js) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [kid, title ?? 'My project', html ?? STARTER.html, css ?? STARTER.css, js ?? STARTER.js]
+      `INSERT INTO kid_projects (kid_id, title, kind, html, css, js, blocks) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      [kid, title ?? (isBlocks ? 'My blocks' : 'My project'), isBlocks ? 'blocks' : 'web', isBlocks ? '' : html ?? STARTER.html, isBlocks ? '' : css ?? STARTER.css, isBlocks ? '' : js ?? STARTER.js, isBlocks ? (blocks ? JSON.stringify(blocks) : null) : null]
     );
     res.status(201).json({ status: 'success', data: { project: rows[0] } });
   } catch (error) {
@@ -96,11 +99,11 @@ export const openForLesson = async (req: Request, res: Response, next: NextFunct
     const kid = kidId(req);
     const lessonId = req.params.lessonId as string;
     const lesson = await pool.query(
-      `SELECT l.id, l.title, e.id AS enrollment_id
+      `SELECT l.id, l.title, l.lesson_type, e.id AS enrollment_id
          FROM enrollments e
          JOIN modules m ON m.course_id = e.course_id
          JOIN lessons l ON l.module_id = m.id
-        WHERE e.kid_id = $1 AND e.status = 'active' AND l.id = $2 LIMIT 1`,
+        WHERE e.kid_id = $1 AND e.status = 'active' AND l.id = $2 AND ${lessonVisibleSql('l', 1)} LIMIT 1`,
       [kid, lessonId]
     );
     if (lesson.rows.length === 0) return next(new AppError('That assignment is not in one of your courses.', 404));
@@ -109,12 +112,13 @@ export const openForLesson = async (req: Request, res: Response, next: NextFunct
     if (existing.rows.length > 0) return res.status(200).json({ status: 'success', data: { project: existing.rows[0] } });
 
     const l = lesson.rows[0];
+    const isBlocks = l.lesson_type === 'scratch'; // a block-coding lesson opens the block editor
     const { rows } = await pool.query(
-      `INSERT INTO kid_projects (kid_id, lesson_id, enrollment_id, title, html, css, js)
-       VALUES ($1,$2,$3,$4,$5,$6,$7)
+      `INSERT INTO kid_projects (kid_id, lesson_id, enrollment_id, title, html, css, js, kind)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
        ON CONFLICT (kid_id, lesson_id) WHERE lesson_id IS NOT NULL DO UPDATE SET updated_at = kid_projects.updated_at
        RETURNING *`,
-      [kid, lessonId, l.enrollment_id, String(l.title).slice(0, 80), STARTER.html, STARTER.css, STARTER.js]
+      [kid, lessonId, l.enrollment_id, String(l.title).slice(0, 80), isBlocks ? '' : STARTER.html, isBlocks ? '' : STARTER.css, isBlocks ? '' : STARTER.js, isBlocks ? 'blocks' : 'web']
     );
     res.status(201).json({ status: 'success', data: { project: rows[0] } });
   } catch (error) {
@@ -127,13 +131,13 @@ export const saveProject = async (req: Request, res: Response, next: NextFunctio
   try {
     const p = await ownProject(req.params.id as string, kidId(req));
     if (p.submitted_at) return next(new AppError('This project is handed in. Take it back first if you want to change it.', 409));
-    const { title, html, css, js } = req.body as { title?: string; html?: string; css?: string; js?: string };
+    const { title, html, css, js, blocks } = req.body as { title?: string; html?: string; css?: string; js?: string; blocks?: object };
     const { rows } = await pool.query(
       `UPDATE kid_projects
           SET title = COALESCE($3, title), html = COALESCE($4, html), css = COALESCE($5, css), js = COALESCE($6, js),
-              updated_at = now()
+              blocks = COALESCE($7::jsonb, blocks), updated_at = now()
         WHERE id = $1 AND kid_id = $2 RETURNING ${LIST_COLS}`,
-      [p.id, p.kid_id, title ?? null, html ?? null, css ?? null, js ?? null]
+      [p.id, p.kid_id, title ?? null, html ?? null, css ?? null, js ?? null, blocks ? JSON.stringify(blocks) : null]
     );
     res.status(200).json({ status: 'success', data: { project: rows[0] } });
   } catch (error) {
@@ -195,7 +199,7 @@ export const adminListProjects = async (req: Request, res: Response, next: NextF
       : status === 'all' ? 'p.submitted_at IS NOT NULL'
       : 'p.submitted_at IS NOT NULL AND p.reviewed_at IS NULL';
     const { rows } = await pool.query(
-      `SELECT p.id, p.title, p.html, p.css, p.js, p.submitted_at, p.marks, p.feedback, p.reviewed_at,
+      `SELECT p.id, p.title, p.kind, p.blocks, p.html, p.css, p.js, p.submitted_at, p.marks, p.feedback, p.reviewed_at,
               k.name AS kid_name, k.age AS kid_age, l.title AS lesson_title, l.assignment, c.title AS course_title
          FROM kid_projects p
          JOIN kids k ON k.id = p.kid_id
