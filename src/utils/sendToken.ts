@@ -34,16 +34,25 @@ export const buildTokenPayload = (e: TokenSubject) => ({
   ...(e.role === 'kid' && e.username ? { username: e.username } : {}),
 });
 
+/** A child's session lasts a day of play; it is renewed (slid forward) every time the app renews its token. */
+export const KID_SESSION_HOURS = 24;
+export const KID_COOKIE = 'kidRefreshToken';
+export const KID_COOKIE_PATH = '/api/v1/kids';
+
 export const sendToken = (entity: TokenSubject, statusCode: number, res: Response, dataKey: 'user' | 'kid' = 'user') => {
   const payload = buildTokenPayload(entity);
   const accessToken = signToken(payload, env.JWT_ACCESS_SECRET as Secret, env.JWT_ACCESS_EXPIRES_IN);
-  const refreshToken = signToken(payload, env.JWT_REFRESH_SECRET as Secret, env.JWT_REFRESH_EXPIRES_IN);
+  const isKid = entity.role === 'kid';
+  const refreshToken = signToken(payload, env.JWT_REFRESH_SECRET as Secret, isKid ? `${KID_SESSION_HOURS}h` : env.JWT_REFRESH_EXPIRES_IN);
 
-  res.cookie('refreshToken', refreshToken, {
-    expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+  // Parents and children use DIFFERENT cookies. Before, a child signing in on the family computer replaced the
+  // parent's cookie, and the parent was signed out the next time their token needed renewing.
+  res.cookie(isKid ? KID_COOKIE : 'refreshToken', refreshToken, {
+    expires: new Date(Date.now() + (isKid ? KID_SESSION_HOURS * 3600 * 1000 : 7 * 24 * 60 * 60 * 1000)),
     httpOnly: true,
     secure: env.IS_PRODUCTION,
     sameSite: 'lax' as const,
+    ...(isKid ? { path: KID_COOKIE_PATH } : {}),
   });
 
   res.status(statusCode).json({

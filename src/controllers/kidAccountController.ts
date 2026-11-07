@@ -3,7 +3,8 @@ import bcrypt from 'bcryptjs';
 import pool from '../config/db';
 import env from '../config/env';
 import { AppError } from '../utils/appError';
-import { sendToken } from '../utils/sendToken';
+import jwt from 'jsonwebtoken';
+import { sendToken, KID_COOKIE, KID_COOKIE_PATH } from '../utils/sendToken';
 import { checkKidPin, KidLoginRow } from '../services/kidAccess';
 import { CONSENT_ITEMS, CONSENT_VERSION, consentDocument } from '../services/consent';
 import { getScreenTimeStatus, getWeeklyUsage, recordHeartbeat } from '../services/screenTime';
@@ -212,6 +213,39 @@ export const pickerLogin = async (req: Request, res: Response, next: NextFunctio
   } catch (error) {
     next(error);
   }
+};
+
+/**
+ * GET /kids/refresh: renew a child's session from their own cookie, so lessons are never interrupted.
+ * A parent's forced PIN reset ends the child's session here too (they must sign in again with the new PIN).
+ */
+export const refreshKid = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const token = req.cookies?.[KID_COOKIE];
+    if (!token) return next(new AppError('No session. Please sign in.', 401));
+    let decoded: { id?: string; role?: string };
+    try {
+      decoded = jwt.verify(token, env.JWT_REFRESH_SECRET) as { id?: string; role?: string };
+    } catch {
+      return next(new AppError('Your session ended. Please sign in again.', 401));
+    }
+    if (decoded.role !== 'kid' || !decoded.id) return next(new AppError('Please sign in.', 401));
+    const r = await pool.query(
+      `SELECT id, parent_id, name, age, grade, avatar, username, pin_reset_required FROM kids WHERE id = $1`,
+      [decoded.id]
+    );
+    const kid = r.rows[0];
+    if (!kid || kid.pin_reset_required) return next(new AppError('Please sign in again.', 401));
+    sendToken({ ...kid, role: 'kid' }, 200, res, 'kid');
+  } catch (error) {
+    next(error);
+  }
+};
+
+/** POST /kids/logout: forget the child's session on this device. */
+export const logoutKid = (_req: Request, res: Response) => {
+  res.clearCookie(KID_COOKIE, { path: KID_COOKIE_PATH, httpOnly: true, sameSite: 'lax', secure: env.IS_PRODUCTION });
+  res.status(200).json({ status: 'success' });
 };
 
 /** POST /kids/login  { username, pin } — still supported for logging in on any device. */

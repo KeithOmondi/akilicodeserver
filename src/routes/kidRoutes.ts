@@ -29,6 +29,10 @@ router.post("/picker/login", kidLoginLimiter, validate(pickerLoginSchema), kidAc
 router.post("/device/link", ...gated, kidAccount.linkDevice);
 router.delete("/device/link", ...parent, kidAccount.unlinkDevice);
 
+// ─── KID SESSION (cookie based, no token needed) ──────────────────────────────
+router.get("/refresh", kidAccount.refreshKid);
+router.post("/logout", kidAccount.logoutKid);
+
 // ─── KID PROTECTED ────────────────────────────────────────────────────────────
 // Fixed paths must come before /:kidId so they are not swallowed by the param route.
 router.get("/me", isAuthenticated, isKid, kidController.getKidMe);
