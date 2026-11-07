@@ -13,6 +13,9 @@ module.exports = {
   module: {
     title: 'Build Your First Web Page',
     description: 'Make a real web page in the editor with HTML, CSS and JavaScript, and hand it in.',
+    // 10-12 arrive here after their block coding; 13-15 and 16-18 start here. Younger groups do not see it.
+    ageGroups: ['10-12', '13-15', '16-18'],
+    lessonType: 'coding',
   },
   lessons: [
     {

@@ -3,12 +3,20 @@
  * Safe to run twice: if the module already exists in that course, nothing is changed.
  * Never creates a course (the price is your decision), and never touches anything else.
  */
+const GROUPS = ['4-6', '7-9', '10-12', '13-15', '16-18'];
+const TYPES = ['notes', 'coding', 'scratch'];
+
 const check = (content) => {
   const problems = [];
+  const badGroups = (g) => g !== undefined && g !== null && (!Array.isArray(g) || g.some((x) => !GROUPS.includes(x)));
+  if (badGroups(content.module?.ageGroups)) problems.push('module.ageGroups must be a list from: ' + GROUPS.join(', '));
+  if (content.module?.lessonType && !TYPES.includes(content.module.lessonType)) problems.push('module.lessonType must be one of: ' + TYPES.join(', '));
   if (!content.courseTitle || !content.module?.title) problems.push('courseTitle and module.title are required');
   (content.lessons || []).forEach((l, i) => {
     const at = `lesson ${i + 1} (${l.title})`;
     if (!l.title || !l.notes) problems.push(`${at}: title and notes are required`);
+    if (badGroups(l.ageGroups)) problems.push(`${at}: ageGroups must be a list from: ${GROUPS.join(', ')}`);
+    if (l.lessonType && !TYPES.includes(l.lessonType)) problems.push(`${at}: lessonType must be one of: ${TYPES.join(', ')}`);
     if (!Array.isArray(l.questions) || l.questions.length === 0) problems.push(`${at}: every lesson needs questions (a child finishes a lesson by passing its quiz)`);
     (l.questions || []).forEach((q, j) => {
       if (!q.question || !Array.isArray(q.options) || q.options.length < 2) problems.push(`${at} question ${j + 1}: needs text and 2+ options`);
@@ -55,9 +63,9 @@ const seedCourse = async (client, content, { apply = false } = {}) => {
     );
     for (const [i, l] of content.lessons.entries()) {
       const les = await client.query(
-        `INSERT INTO lessons (module_id, title, notes, lesson_type, order_index, assignment)
-         VALUES ($1,$2,$3,'notes',$4,$5) RETURNING id`,
-        [mod.rows[0].id, l.title, l.notes, i, l.assignment ?? null]
+        `INSERT INTO lessons (module_id, title, notes, lesson_type, order_index, assignment, age_groups)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [mod.rows[0].id, l.title, l.notes, l.lessonType ?? content.module.lessonType ?? 'notes', i, l.assignment ?? null, (l.ageGroups ?? content.module.ageGroups) || null]
       );
       for (const [j, q] of l.questions.entries()) {
         await client.query(

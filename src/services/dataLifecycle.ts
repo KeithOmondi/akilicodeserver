@@ -40,7 +40,7 @@ export const exportKidData = async (parentId: string, kidId: string) => {
     learning_calendar: await rows(`SELECT * FROM learning_calendar WHERE kid_id = $1`, [kidId]),
     testimonials: await rows(`SELECT rating, title, content, status, created_at FROM testimonials WHERE kid_id = $1`, [kidId]),
     trials: await rows(`SELECT * FROM trial_access WHERE kid_id = $1`, [kidId]),
-    coding_projects: await rows(`SELECT title, html, css, js, submitted_at, marks, feedback, created_at, updated_at FROM kid_projects WHERE kid_id = $1`, [kidId]),
+    coding_projects: await rows(`SELECT title, kind, html, css, js, blocks, submitted_at, marks, feedback, created_at, updated_at FROM kid_projects WHERE kid_id = $1`, [kidId]),
     code_snippets: await rows(`SELECT * FROM code_snippets WHERE user_id = $1`, [kidId]),
     screen_time_last_7_days: await rows(`SELECT day::text, seconds FROM kid_usage_daily WHERE kid_id = $1 AND day > current_date - 8 ORDER BY day`, [kidId]),
     payments: await rows(`SELECT receipt_number, amount, method, status, date FROM payments WHERE kid_id = $1`, [kidId]),

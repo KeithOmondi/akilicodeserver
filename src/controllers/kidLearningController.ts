@@ -113,6 +113,7 @@ export const getCourseContent = async (req: Request, res: Response, next: NextFu
          AND kp.enrollment_id = $1
        WHERE m.course_id = $2
        GROUP BY m.id
+       HAVING COUNT(l.id) > 0
        ORDER BY m.order_index ASC`,
       [enrollmentId, enrollment.course_id, kidId]
     );
