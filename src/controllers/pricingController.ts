@@ -13,9 +13,7 @@ import type {
   CouponValidationResult,
 } from '../interfaces/pricing.interface';
 
-interface AuthRequest extends Request {
-  user?: IUser;
-}
+
 
 // ── PUBLIC ────────────────────────────────────────────────────────────────────
 
@@ -60,7 +58,7 @@ export const getPublicPlans = async (req: Request, res: Response, next: NextFunc
  * POST /pricing/validate-coupon — public (parent must be logged in)
  * Validates a coupon code against a plan
  */
-export const validateCoupon = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const validateCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { code, billing_cycle, plan_id }: ValidateCouponDTO = req.body;
 
@@ -153,7 +151,7 @@ export const validateCoupon = async (req: AuthRequest, res: Response, next: Next
 /**
  * GET /pricing/admin/plans
  */
-export const getAllPlans = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getAllPlans = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await pool.query(
       `SELECT * FROM pricing_plans ORDER BY sort_order ASC`
@@ -171,7 +169,7 @@ export const getAllPlans = async (req: AuthRequest, res: Response, next: NextFun
 /**
  * POST /pricing/admin/plans
  */
-export const createPlan = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const createPlan = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       name, billing_cycle, price, original_price,
@@ -208,7 +206,7 @@ export const createPlan = async (req: AuthRequest, res: Response, next: NextFunc
 /**
  * PUT /pricing/admin/plans/:planId
  */
-export const updatePlan = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const updatePlan = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { planId } = req.params;
     const updates: UpdatePricingPlanDTO = req.body;
@@ -245,7 +243,7 @@ export const updatePlan = async (req: AuthRequest, res: Response, next: NextFunc
 /**
  * DELETE /pricing/admin/plans/:planId
  */
-export const deletePlan = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const deletePlan = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { planId } = req.params;
 
@@ -272,7 +270,7 @@ export const deletePlan = async (req: AuthRequest, res: Response, next: NextFunc
 /**
  * GET /pricing/admin/coupons
  */
-export const getAllCoupons = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getAllCoupons = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await pool.query(
       `SELECT * FROM coupons ORDER BY created_at DESC`
@@ -290,7 +288,7 @@ export const getAllCoupons = async (req: AuthRequest, res: Response, next: NextF
 /**
  * POST /pricing/admin/coupons
  */
-export const createCoupon = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const createCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const {
       code, description, discount_type, discount_value,
@@ -326,7 +324,7 @@ export const createCoupon = async (req: AuthRequest, res: Response, next: NextFu
 /**
  * PUT /pricing/admin/coupons/:couponId
  */
-export const updateCoupon = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const updateCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { couponId } = req.params;
     const updates: UpdateCouponDTO = req.body;
@@ -363,7 +361,7 @@ export const updateCoupon = async (req: AuthRequest, res: Response, next: NextFu
 /**
  * DELETE /pricing/admin/coupons/:couponId
  */
-export const deleteCoupon = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const deleteCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { couponId } = req.params;
 
@@ -386,7 +384,7 @@ export const deleteCoupon = async (req: AuthRequest, res: Response, next: NextFu
  * POST /pricing/admin/coupons/:couponId/toggle
  * Quickly enable/disable a coupon
  */
-export const toggleCoupon = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const toggleCoupon = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { couponId } = req.params;
 

@@ -10,7 +10,15 @@ import {
 } from "../controllers/enrollmentController";
 import { isAuthenticated, isAuthorized } from "../middleware/authMiddleware";
 
+import { validate } from '../middleware/validate';
+import * as AV from '../validators/admin.validators';
+import * as LV from '../validators/learning.validators';
 const router = Router();
+// PHASE2-VALIDATION: authenticate + validate BEFORE the handlers below (Express runs matching routes in order).
+router.post('/create', isAuthenticated, isAuthorized('parent'), validate(LV.enrollKidSchema), (_req, _res, next) => next());
+router.get('/kid/:kidId', isAuthenticated, isAuthorized('admin'), validate(AV.enrollmentKidParam, 'params'), (_req, _res, next) => next());
+router.patch('/:enrollmentId/cancel', isAuthenticated, validate(LV.enrollmentParam, 'params'), (_req, _res, next) => next());
+
 
 router.use(isAuthenticated);
 

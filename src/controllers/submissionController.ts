@@ -5,9 +5,7 @@ import sendMail from '../utils/sendMail';
 import { IUser } from '../interfaces/user.interface';
 import { IKid } from '../interfaces/kid.interface';
 
-interface AuthRequest extends Omit<Request, 'user'> {
-  user?: IUser | IKid;
-}
+
 
 // ─── Validate GitHub URL ──────────────────────────────────────────────────────
 const isValidGithubUrl = (url: string): boolean => {
@@ -20,7 +18,7 @@ const isValidGithubUrl = (url: string): boolean => {
 };
 
 // ─── KID: SUBMIT ASSIGNMENT ───────────────────────────────────────────────────
-export const submitAssignment = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const submitAssignment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -104,7 +102,7 @@ export const submitAssignment = async (req: AuthRequest, res: Response, next: Ne
 };
 
 // ─── KID: GET MY SUBMISSIONS ──────────────────────────────────────────────────
-export const getMySubmissions = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getMySubmissions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -136,7 +134,7 @@ export const getMySubmissions = async (req: AuthRequest, res: Response, next: Ne
 };
 
 // ─── KID: GET SINGLE SUBMISSION ───────────────────────────────────────────────
-export const getSubmissionByLesson = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getSubmissionByLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -165,7 +163,7 @@ export const getSubmissionByLesson = async (req: AuthRequest, res: Response, nex
 };
 
 // ─── ADMIN: GET ALL SUBMISSIONS ───────────────────────────────────────────────
-export const getAllSubmissions = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getAllSubmissions = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { status, lesson_id, course_id } = req.query;
 
@@ -216,7 +214,7 @@ export const getAllSubmissions = async (req: AuthRequest, res: Response, next: N
 };
 
 // ─── ADMIN: REVIEW SUBMISSION ─────────────────────────────────────────────────
-export const reviewSubmission = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const reviewSubmission = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const adminId = req.user?.id;
     if (!adminId) return next(new AppError('Unauthorized access.', 401));
@@ -299,7 +297,7 @@ export const reviewSubmission = async (req: AuthRequest, res: Response, next: Ne
 };
 
 // ─── ADMIN: GET SUBMISSIONS FOR A LESSON ─────────────────────────────────────
-export const getSubmissionsByLesson = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getSubmissionsByLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { lessonId } = req.params;
 

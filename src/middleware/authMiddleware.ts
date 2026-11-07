@@ -5,12 +5,10 @@ import { AppError } from '../utils/appError';
 import { IJWTPayload, UserRole, IUser } from '../interfaces/user.interface';
 import { IKid } from '../interfaces/kid.interface';
 
-// Use Omit to clear the existing 'user' property and redefine it as a Union
-interface AuthRequest extends Omit<Request, 'user'> {
-  user?: IUser | IKid;
-}
+// Type guard — narrows req.user to IKid
+export const isKidUser = (user: IUser | IKid): user is IKid => user.role === 'kid';
 
-export const isAuthenticated = (req: AuthRequest, res: Response, next: NextFunction) => {
+export const isAuthenticated = (req: Request, res: Response, next: NextFunction) => {
   let token: string | undefined;
 
   if (req.headers.authorization?.startsWith('Bearer')) {
@@ -24,27 +22,32 @@ export const isAuthenticated = (req: AuthRequest, res: Response, next: NextFunct
   try {
     const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET) as IJWTPayload;
 
-    // Branch logic based on the role in the JWT
     if (decoded.role === 'kid') {
-      req.user = {
+      if (!decoded.parent_id) {
+        return next(new AppError('Unauthorized: Malformed kid token.', 401));
+      }
+
+      const kidUser: IKid = {
         id: decoded.id,
-        parent_id: decoded.parent_id || '',
+        parent_id: decoded.parent_id,
         name: decoded.name,
-        role: 'kid', 
         username: decoded.username,
-        age: 0, // Placeholder or fetch from DB
-        created_at: new Date()
-      } as IKid;
+        role: 'kid',
+        age: 0,
+        created_at: new Date(),
+      };
+      req.user = kidUser as any;
     } else {
-      req.user = {
+      const regularUser: IUser = {
         id: decoded.id,
         name: decoded.name,
-        role: decoded.role, // 'admin' | 'parent'
-        phone: decoded.phone,
-        email: '', 
+        email: decoded.email ?? '',
+        phone: decoded.phone ?? '',
+        role: decoded.role,
         is_verified: true,
-        created_at: new Date()
-      } as IUser;
+        created_at: new Date(),
+      };
+      req.user = regularUser as any;
     }
 
     next();
@@ -54,17 +57,22 @@ export const isAuthenticated = (req: AuthRequest, res: Response, next: NextFunct
 };
 
 export const isAuthorized = (...roles: UserRole[]) => {
-  return (req: AuthRequest, res: Response, next: NextFunction) => {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return next(new AppError('User context missing.', 500));
     }
 
-    // Now that both IUser and IKid have a 'role' property, 
-    // TypeScript allows this check.
-    if (!roles.includes(req.user.role as UserRole)) {
-      return next(new AppError(`Forbidden: ${req.user.role} role does not have access.`, 403));
+    const user = req.user as any as IUser | IKid;
+
+    if (!roles.includes(user.role as UserRole)) {
+      return next(new AppError(`Forbidden: ${user.role} role does not have access.`, 403));
     }
 
     next();
   };
 };
+
+export const isAdmin = isAuthorized('admin');
+export const isParent = isAuthorized('parent');
+export const isKid = isAuthorized('kid');
+export const isParentOrAdmin = isAuthorized('parent', 'admin');

@@ -1,17 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
-import { IUser } from '../interfaces/user.interface';
-import { IKid } from '../interfaces/kid.interface';
 
-interface KidRequest extends Omit<Request, 'user'> {
-  user?: IUser | IKid;
-}
-
-/**
- * GET ALL ENROLLED COURSES FOR THE KID
- */
-export const getMyCourses = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getMyCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -73,14 +64,10 @@ export const getMyCourses = async (req: KidRequest, res: Response, next: NextFun
   }
 };
 
-/**
- * GET COURSE CONTENT — MODULES AND LESSONS (with assignment)
- */
-export const getCourseContent = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getCourseContent = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     const { enrollmentId } = req.params;
-
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     const enrollmentResult = await pool.query(
@@ -108,7 +95,7 @@ export const getCourseContent = async (req: KidRequest, res: Response, next: Nex
               'id',            l.id,
               'title',         l.title,
               'notes',         l.notes,
-              'assignment',    l.assignment,            -- ✨ NEW
+              'assignment',    l.assignment,
               'language',      l.language,
               'starter_code',  l.starter_code,
               'order_index',   l.order_index,
@@ -142,14 +129,10 @@ export const getCourseContent = async (req: KidRequest, res: Response, next: Nex
   }
 };
 
-/**
- * GET A SINGLE LESSON (already includes assignment via l.*)
- */
-export const getLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getLesson = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     const { enrollmentId, lessonId } = req.params;
-
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     const enrollmentResult = await pool.query(
@@ -200,17 +183,12 @@ export const getLesson = async (req: KidRequest, res: Response, next: NextFuncti
   }
 };
 
-/**
- * SUBMIT LESSON SOLUTION (for notes-only or auto-graded lessons)
- * For coding/scratch lessons, use the separate /api/submissions endpoint
- */
-export const submitLesson = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const submitLesson = async (req: Request, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
     const kidId = req.user?.id;
     const { enrollmentId, lessonId } = req.params;
     const { code_submitted } = req.body;
-
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
 
     await client.query('BEGIN');
@@ -243,7 +221,6 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
 
     const lesson = lessonResult.rows[0];
 
-    // For coding/scratch lessons with an assignment, require GitHub submission via separate API
     if ((lesson.lesson_type === 'coding' || lesson.lesson_type === 'scratch') && lesson.assignment) {
       await client.query('ROLLBACK');
       return next(new AppError(
@@ -281,9 +258,7 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
     );
 
     await client.query(
-      `UPDATE kids
-       SET total_points = COALESCE(total_points, 0) + $1
-       WHERE id = $2`,
+      `UPDATE kids SET total_points = COALESCE(total_points, 0) + $1 WHERE id = $2`,
       [totalPoints, kidId]
     );
 
@@ -305,10 +280,7 @@ export const submitLesson = async (req: KidRequest, res: Response, next: NextFun
   }
 };
 
-/**
- * GET KID'S DASHBOARD STATS
- */
-export const getDashboardStats = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getDashboardStats = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -374,10 +346,7 @@ export const getDashboardStats = async (req: KidRequest, res: Response, next: Ne
   }
 };
 
-/**
- * GET LEADERBOARD
- */
-export const getLeaderboard = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getLeaderboard = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { limit = 10 } = req.query;
 
@@ -412,10 +381,7 @@ export const getLeaderboard = async (req: KidRequest, res: Response, next: NextF
   }
 };
 
-/**
- * GET KID'S ACHIEVEMENTS / BADGES
- */
-export const getAchievements = async (req: KidRequest, res: Response, next: NextFunction) => {
+export const getAchievements = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const kidId = req.user?.id;
     if (!kidId) return next(new AppError('Unauthorized access.', 401));
@@ -435,11 +401,11 @@ export const getAchievements = async (req: KidRequest, res: Response, next: Next
     const completed = parseInt(result.rows[0]?.total_lessons_completed) || 0;
     const badges = [];
 
-    if (completed >= 1)  badges.push({ name: 'First Step',      icon: '🌟', earned: true });
-    if (completed >= 5)  badges.push({ name: 'Rising Star',      icon: '⭐', earned: true });
-    if (completed >= 10) badges.push({ name: 'Code Master',      icon: '🏆', earned: true });
-    if (completed >= 25) badges.push({ name: 'Legendary Coder',  icon: '🎖️', earned: true });
-    if (completed >= 50) badges.push({ name: 'Coding Hero',      icon: '🦸', earned: true });
+    if (completed >= 1)  badges.push({ name: 'First Step',     icon: '🌟', earned: true });
+    if (completed >= 5)  badges.push({ name: 'Rising Star',    icon: '⭐', earned: true });
+    if (completed >= 10) badges.push({ name: 'Code Master',    icon: '🏆', earned: true });
+    if (completed >= 25) badges.push({ name: 'Legendary Coder',icon: '🎖️', earned: true });
+    if (completed >= 50) badges.push({ name: 'Coding Hero',    icon: '🦸', earned: true });
 
     if (completed < 5)  badges.push({ name: 'Rising Star',     icon: '⭐', earned: false, needed: 5  - completed });
     if (completed < 10) badges.push({ name: 'Code Master',     icon: '🏆', earned: false, needed: 10 - completed });

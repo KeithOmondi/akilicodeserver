@@ -35,3 +35,9 @@ build/
 *.njsproj
 *.sln
 *.sw?
+# Runtime scratch
+temp/
+.env.*
+!.env.example
+
+backups/

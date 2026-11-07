@@ -1,26 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
-import { IUser } from '../interfaces/user.interface';
 import { calculateNextPaymentDate } from '../utils/paymentSchedule';
-import { IKid } from '../interfaces/kid.interface';
 
-interface AuthRequest extends Request {
-  user?: IUser;
-}
-
-interface KidAuthRequest extends Request {
-  kid?: IKid;
-}
-
-export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const enrollKid = async (req: Request, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
 
     const { kid_id, course_id, fee_amount, billing_cycle, start_date } = req.body;
-    //              ↑ changed from course_name to course_id
 
     if (!kid_id || !course_id || !fee_amount || !billing_cycle) {
       return next(new AppError('Please provide kid, course, fee, and billing cycle.', 400));
@@ -28,7 +17,6 @@ export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunct
 
     await client.query('BEGIN');
 
-    // Verify kid belongs to parent
     const kidCheck = await client.query(
       'SELECT id FROM kids WHERE id = $1 AND parent_id = $2',
       [kid_id, parentId]
@@ -38,7 +26,6 @@ export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunct
       return next(new AppError('Kid not found or does not belong to you.', 404));
     }
 
-    // ✅ Look up course to get name and confirm it exists
     const courseCheck = await client.query(
       'SELECT id, title FROM courses WHERE id = $1',
       [course_id]
@@ -50,7 +37,19 @@ export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunct
 
     const course_name = courseCheck.rows[0].title;
 
-    // ✅ Prevent duplicate active enrollment
+    // Never trust a price sent by the browser. It must equal the course price
+    // (monthly / once-off) or an active pricing plan for that billing cycle.
+    const priceCheck = await client.query(
+      `SELECT 1 FROM courses WHERE id = $1 AND price = $2 AND $3 IN ('monthly','once-off')
+       UNION ALL
+       SELECT 1 FROM pricing_plans WHERE is_active = true AND billing_cycle = $3 AND price = $2`,
+      [course_id, fee_amount, billing_cycle]
+    );
+    if (priceCheck.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return next(new AppError('That price is not valid for this course. Please refresh and try again.', 400));
+    }
+
     const dupCheck = await client.query(
       `SELECT id FROM enrollments 
        WHERE kid_id = $1 AND course_id = $2 AND status NOT IN ('cancelled')`,
@@ -61,7 +60,6 @@ export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunct
       return next(new AppError('This kid is already enrolled in that course.', 409));
     }
 
-    // ✅ Save both course_id and course_name
     const result = await client.query(
       `INSERT INTO enrollments 
         (kid_id, parent_id, course_id, course_name, fee_amount, billing_cycle, start_date, status)
@@ -84,11 +82,7 @@ export const enrollKid = async (req: AuthRequest, res: Response, next: NextFunct
   }
 };
 
-/**
- * GET ALL ENROLLMENTS FOR MY KIDS
- * Includes next_payment_date calculated from last completed payment
- */
-export const getMyEnrollments = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getMyEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
@@ -97,13 +91,11 @@ export const getMyEnrollments = async (req: AuthRequest, res: Response, next: Ne
       `SELECT 
         e.*,
         k.name AS kid_name,
-        -- Get the most recent completed payment date for this enrollment
         (
           SELECT MAX(p.date) 
           FROM payments p 
           WHERE p.enrollment_id = e.id AND p.status = 'completed'
         ) AS last_payment_date,
-        -- Count total completed payments
         (
           SELECT COUNT(*) 
           FROM payments p 
@@ -116,7 +108,6 @@ export const getMyEnrollments = async (req: AuthRequest, res: Response, next: Ne
       [parentId]
     );
 
-    // Calculate next_payment_date for each enrollment
     const enrollments = result.rows.map((enrollment) => {
       const lastPaymentDate = enrollment.last_payment_date
         ? new Date(enrollment.last_payment_date)
@@ -130,16 +121,11 @@ export const getMyEnrollments = async (req: AuthRequest, res: Response, next: Ne
       } else if (enrollment.status === 'cancelled') {
         payment_status = 'cancelled';
       } else if (enrollment.billing_cycle === 'once-off') {
-        // Once-off — completed after first payment
         payment_status = 'once-off';
         next_payment_date = null;
       } else if (lastPaymentDate) {
-        next_payment_date = calculateNextPaymentDate(
-          lastPaymentDate,
-          enrollment.billing_cycle
-        );
+        next_payment_date = calculateNextPaymentDate(lastPaymentDate, enrollment.billing_cycle);
 
-        // Determine payment status
         if (!next_payment_date) {
           payment_status = 'once-off';
         } else {
@@ -174,10 +160,7 @@ export const getMyEnrollments = async (req: AuthRequest, res: Response, next: Ne
   }
 };
 
-/**
- * GET ENROLLMENTS FOR A SPECIFIC KID
- */
-export const getKidEnrollments = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getKidEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
@@ -203,10 +186,7 @@ export const getKidEnrollments = async (req: AuthRequest, res: Response, next: N
   }
 };
 
-/**
- * CANCEL AN ENROLLMENT
- */
-export const cancelEnrollment = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const cancelEnrollment = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
@@ -232,10 +212,7 @@ export const cancelEnrollment = async (req: AuthRequest, res: Response, next: Ne
   }
 };
 
-/**
- * GET ALL ENROLLMENTS (ADMIN ONLY)
- */
-export const getAllEnrollments = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getAllEnrollments = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const result = await pool.query(
       `SELECT 
@@ -264,10 +241,7 @@ export const getAllEnrollments = async (req: AuthRequest, res: Response, next: N
   }
 };
 
-/**
- * GET A SINGLE ENROLLMENT BY ID (PARENT)
- */
-export const getEnrollmentById = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getEnrollmentById = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parentId = req.user?.id;
     if (!parentId) return next(new AppError('Unauthorized access.', 401));
@@ -295,14 +269,10 @@ export const getEnrollmentById = async (req: AuthRequest, res: Response, next: N
   }
 };
 
-/**
- * GET MY ENROLLED COURSES (KID VIEW)
- * Kids can only view courses they have been enrolled in by their parent
- * Only shows active enrollments (paid and activated)
- */
-export const getMyEnrolledCourses = async (req: AuthRequest, res: Response, next: NextFunction) => {
+// ─── KID VIEW ────────────────────────────────────────────────────────────────
+// Moved from enrollmentController — kid views their own active enrollments
+export const getMyEnrolledCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // ✅ Read from req.user — that's what isAuthenticated sets
     const kidId = req.user?.id;
 
     if (!kidId || req.user?.role !== 'kid') {
@@ -332,35 +302,32 @@ export const getMyEnrolledCourses = async (req: AuthRequest, res: Response, next
           SELECT COUNT(*)::int 
           FROM lessons l
           JOIN modules m ON m.id = l.module_id
-          WHERE m.course_id = e.course_id    -- ✅ use course_id not string match
+          WHERE m.course_id = e.course_id
         ) as total_lessons
        FROM enrollments e
-       LEFT JOIN courses c ON c.id = e.course_id  -- ✅ join on id not title
+       LEFT JOIN courses c ON c.id = e.course_id
        WHERE e.kid_id = $1 
          AND e.status = 'active'
        ORDER BY e.created_at DESC`,
       [kidId]
     );
 
-    const courses = result.rows.map((course) => {
-      const total = course.total_lessons || 0;
-      const completed = course.completed_lessons || 0;
-
-      return {
-        enrollment_id: course.enrollment_id,
-        course_id: course.course_id,
-        name: course.course_name,
-        description: course.description,
-        duration: course.duration,
-        image: course.image_url,
-        category: course.category,
-        enrolled_at: course.enrolled_at,
-        status: course.enrollment_status,
-        progress: total > 0 ? Math.round((completed / total) * 100) : 0,
-        completed_lessons: completed,
-        total_lessons: total,
-      };
-    });
+    const courses = result.rows.map((course) => ({
+      enrollment_id: course.enrollment_id,
+      course_id: course.course_id,
+      name: course.course_name,
+      description: course.description,
+      duration: course.duration,
+      image: course.image_url,
+      category: course.category,
+      enrolled_at: course.enrolled_at,
+      status: course.enrollment_status,
+      progress: course.total_lessons > 0
+        ? Math.round((course.completed_lessons / course.total_lessons) * 100)
+        : 0,
+      completed_lessons: course.completed_lessons,
+      total_lessons: course.total_lessons,
+    }));
 
     res.status(200).json({
       status: 'success',

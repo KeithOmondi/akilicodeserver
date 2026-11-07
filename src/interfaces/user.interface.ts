@@ -34,8 +34,8 @@ export interface IJWTPayload {
   id: string;
   name: string;
   role: UserRole;
+  email?: string;      // ← add this
   phone?: string;
-  kid_id?: string;
   parent_id?: string;
   username?: string;
   iat?: number;

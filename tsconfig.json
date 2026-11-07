@@ -6,8 +6,11 @@
     "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "typeRoots": ["./src/types", "./node_modules/@types"]  // ← add this
   },
+  "ts-node": { "transpileOnly": true },
   "include": ["src/**/*"]
 }

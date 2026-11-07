@@ -1,14 +1,14 @@
-import * as SibApiV3Sdk from "@sendinblue/client";
+import axios from "axios";
 import env from "../config/env";
 
 /* ============================================================
-   BREVO CLIENT SETUP
+   BREVO (plain HTTPS API; the old SDK pulled in the abandoned "request" library)
 ============================================================ */
-const transactionalApi = new SibApiV3Sdk.TransactionalEmailsApi();
-transactionalApi.setApiKey(SibApiV3Sdk.TransactionalEmailsApiApiKeys.apiKey, env.BREVO_API_KEY);
-
-const accountApi = new SibApiV3Sdk.AccountApi();
-accountApi.setApiKey(SibApiV3Sdk.AccountApiApiKeys.apiKey, env.BREVO_API_KEY);
+const brevo = axios.create({
+  baseURL: "https://api.brevo.com/v3",
+  headers: { "api-key": env.BREVO_API_KEY, accept: "application/json", "content-type": "application/json" },
+  timeout: 15000,
+});
 
 /* ============================================================
    TYPES
@@ -36,7 +36,7 @@ export const sendMail = async ({
       ? to.map((email) => ({ email })) 
       : [{ email: to }];
 
-    const emailData: SibApiV3Sdk.SendSmtpEmail = {
+    const emailData = {
       sender: {
         name: env.MAIL_FROM_NAME,
         email: env.MAIL_FROM_EMAIL,
@@ -48,12 +48,12 @@ export const sendMail = async ({
       replyTo: replyTo ? { email: replyTo } : undefined,
     };
 
-    const response = await transactionalApi.sendTransacEmail(emailData);
-    console.log(`[EMAIL SENT] to ${to} | ID: ${(response as any)?.body?.messageId || "N/A"}`);
+    const response = await brevo.post("/smtp/email", emailData);
+    console.log(`[EMAIL SENT] ${Array.isArray(to) ? to.length + " recipients" : to.replace(/^(.).*(@.*)$/, "$1***$2")} | ID: ${response.data?.messageId || "N/A"}`);
 
     return response;
   } catch (err: any) {
-    const errorMsg = err?.response?.body?.message || err.message;
+    const errorMsg = err?.response?.data?.message || err.message;
     console.error(`[EMAIL ERROR] to ${to}:`, errorMsg);
     throw new Error(`Email sending failed: ${errorMsg}`);
   }
@@ -85,7 +85,7 @@ export const sendOtpMail = async (email: string, otp: string, name: string) => {
 ============================================================ */
 export const verifyMailConnection = async () => {
   try {
-    await accountApi.getAccount();
+    await brevo.get("/account");
     console.log("[BREVO] Connected successfully");
   } catch (err: any) {
     console.error("[BREVO] Connection failed:", err.message || err);

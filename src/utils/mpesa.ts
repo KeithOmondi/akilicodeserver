@@ -1,10 +1,16 @@
 import axios from 'axios';
 import env from '../config/env';
+import { normalizeKenyanPhone } from '../validators/common';
 
 const BASE_URL =
   env.MPESA_ENV === 'production'
     ? 'https://api.safaricom.co.ke'
     : 'https://sandbox.safaricom.co.ke';
+
+const HTTP_TIMEOUT_MS = 15000;
+
+/** Safaricom-facing URL = configured base URL + secret path segment. */
+export const withSecret = (base: string) => `${base}/${env.MPESA_CALLBACK_SECRET}`;
 
 // ─── GET OAUTH TOKEN ─────────────────────────────────────────────────────────
 
@@ -15,9 +21,7 @@ export const getMpesaToken = async (): Promise<string> => {
 
   const response = await axios.get(
     `${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`,
-    {
-      headers: { Authorization: `Basic ${credentials}` },
-    }
+    { headers: { Authorization: `Basic ${credentials}` }, timeout: HTTP_TIMEOUT_MS }
   );
 
   return response.data.access_token;
@@ -46,15 +50,11 @@ export const initiateStkPush = async (
   accountReference: string,
   description: string
 ) => {
+  const formattedPhone = normalizeKenyanPhone(phone);
+  if (!formattedPhone) throw new Error('Invalid Kenyan phone number');
+
   const token = await getMpesaToken();
   const { password, timestamp } = generatePassword();
-
-  let formattedPhone = phone.replace(/\D/g, '');
-  if (formattedPhone.startsWith('0')) {
-    formattedPhone = '254' + formattedPhone.slice(1);
-  } else if (formattedPhone.startsWith('7')) {
-    formattedPhone = '254' + formattedPhone;
-  }
 
   const response = await axios.post(
     `${BASE_URL}/mpesa/stkpush/v1/processrequest`,
@@ -62,24 +62,23 @@ export const initiateStkPush = async (
       BusinessShortCode: env.MPESA_SHORTCODE,
       Password: password,
       Timestamp: timestamp,
-      TransactionType: 'CustomerPayBillOnline',
+      TransactionType: env.MPESA_TRANSACTION_TYPE,
       Amount: Math.round(amount),
       PartyA: formattedPhone,
-      PartyB: env.MPESA_SHORTCODE,
+      PartyB: env.MPESA_PARTY_B,
       PhoneNumber: formattedPhone,
-      CallBackURL: env.MPESA_CALLBACK_URL,
+      CallBackURL: withSecret(env.MPESA_CALLBACK_URL),
       AccountReference: accountReference.slice(0, 12),
       TransactionDesc: description.slice(0, 13),
     },
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    { headers: { Authorization: `Bearer ${token}` }, timeout: HTTP_TIMEOUT_MS }
   );
 
   return response.data;
 };
 
 // ─── QUERY STK PUSH STATUS ───────────────────────────────────────────────────
+// Throws if Safaricom says the request is still being processed (HTTP 500).
 
 export const querySTKStatus = async (checkoutRequestId: string) => {
   const token = await getMpesaToken();
@@ -93,7 +92,7 @@ export const querySTKStatus = async (checkoutRequestId: string) => {
       Timestamp: timestamp,
       CheckoutRequestID: checkoutRequestId,
     },
-    { headers: { Authorization: `Bearer ${token}` } }
+    { headers: { Authorization: `Bearer ${token}` }, timeout: HTTP_TIMEOUT_MS }
   );
 
   return response.data;
@@ -109,12 +108,10 @@ export const registerC2BUrls = async () => {
     {
       ShortCode: env.MPESA_SHORTCODE,
       ResponseType: 'Completed',
-      ConfirmationURL: env.MPESA_C2B_CONFIRMATION_URL,
-      ValidationURL: env.MPESA_C2B_VALIDATION_URL,
+      ConfirmationURL: withSecret(env.MPESA_C2B_CONFIRMATION_URL),
+      ValidationURL: withSecret(env.MPESA_C2B_VALIDATION_URL),
     },
-    {
-      headers: { Authorization: `Bearer ${token}` },
-    }
+    { headers: { Authorization: `Bearer ${token}` }, timeout: HTTP_TIMEOUT_MS }
   );
 
   return response.data;

@@ -45,32 +45,33 @@ export const getAllPayments = async (req: AuthRequest, res: Response, next: Next
 export const createPayment = async (req: AuthRequest, res: Response, next: NextFunction) => {
   const client = await pool.connect();
   try {
-    const parentId = req.user?.id;
-    if (!parentId) return next(new AppError('Unauthorized access.', 401));
+    // ADMIN ONLY (see paymentRoutes). Records a cash / bank payment received outside M-Pesa.
+    const adminId = req.user?.id;
+    if (!adminId) return next(new AppError('Unauthorized access.', 401));
 
     const { enrollment_id, amount, method, reference, description, date } = req.body;
 
-    if (!enrollment_id || !amount || !method) {
+    if (!enrollment_id || !method || !(Number(amount) > 0)) {
       return next(new AppError('Please provide enrollment, amount, and payment method.', 400));
     }
 
     await client.query('BEGIN');
 
-    // Confirm enrollment belongs to this parent and is pending or active
     const enrollmentCheck = await client.query(
-      `SELECT e.*, k.id AS kid_id, k.name AS kid_name 
+      `SELECT e.*, k.id AS kid_id, k.name AS kid_name
        FROM enrollments e
        JOIN kids k ON e.kid_id = k.id
-       WHERE e.id = $1 AND e.parent_id = $2`,
-      [enrollment_id, parentId]
+       WHERE e.id = $1`,
+      [enrollment_id]
     );
 
     if (enrollmentCheck.rows.length === 0) {
       await client.query('ROLLBACK');
-      return next(new AppError('Enrollment not found or does not belong to you.', 404));
+      return next(new AppError('Enrollment not found.', 404));
     }
 
     const enrollment = enrollmentCheck.rows[0];
+    const parentId = enrollment.parent_id;
     const receipt_number = generateReceiptNumber();
     const paymentDate = date || new Date();
 
@@ -110,8 +111,7 @@ export const createPayment = async (req: AuthRequest, res: Response, next: NextF
            last_payment_date = $1,
            next_payment_date = $2,
            mpesa_receipt_number = $3,
-           total_paid = COALESCE(total_paid, 0) + $4,
-           updated_at = NOW()
+           total_paid = COALESCE(total_paid, 0) + $4
        WHERE id = $5`,
       [paymentDate, nextPaymentDate, receipt_number, amount, enrollment_id]
     );
@@ -179,9 +179,9 @@ export const getKidPayments = async (req: AuthRequest, res: Response, next: Next
        FROM payments p
        JOIN kids k ON p.kid_id = k.id
        JOIN enrollments e ON p.enrollment_id = e.id
-       WHERE p.kid_id = $1 AND p.parent_id = $2
+       WHERE p.kid_id = $1 AND ($3::boolean OR p.parent_id = $2)
        ORDER BY p.created_at DESC`,
-      [kidId, parentId]
+      [kidId, parentId, req.user?.role === 'admin']
     );
 
     res.status(200).json({
@@ -210,8 +210,8 @@ export const getReceipt = async (req: AuthRequest, res: Response, next: NextFunc
        JOIN kids k ON p.kid_id = k.id
        JOIN enrollments e ON p.enrollment_id = e.id
        JOIN users u ON p.parent_id = u.id
-       WHERE p.id = $1 AND p.parent_id = $2`,
-      [paymentId, parentId]
+       WHERE p.id = $1 AND ($3::boolean OR p.parent_id = $2)`,
+      [paymentId, parentId, req.user?.role === 'admin']
     );
 
     if (result.rows.length === 0) {

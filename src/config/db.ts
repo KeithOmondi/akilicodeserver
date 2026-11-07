@@ -9,25 +9,23 @@ const isProduction = process.env.NODE_ENV === 'production';
 const poolConfig: PoolConfig = {
   connectionString: config.DATABASE_URL,
   max: 20,
-  idleTimeoutMillis: 30000,
+  idleTimeoutMillis: 10000, // release idle connections before Neon closes them
+  keepAlive: true,
   connectionTimeoutMillis: 10000,
   
   // 2. Apply SSL logic dynamically
-  ssl: isProduction 
-    ? { rejectUnauthorized: false } // Production/Cloud (Supabase, Render, etc.)
+  ssl: (isProduction || /sslmode=|neon\.tech/.test(config.DATABASE_URL))
+    ? { rejectUnauthorized: isProduction } // production: verify the server certificate (Neon's is publicly trusted)
     : false,                         // Local Development
 };
 
 const pool = new Pool(poolConfig);
 
 // Listen for pool events for better debugging
-pool.on('connect', () => {
-  console.log('🐘 PostgreSQL Pool connected');
-});
-
 pool.on('error', (err) => {
-  console.error('Unexpected error on idle PostgreSQL client', err);
-  process.exit(-1);
+  // Neon (and any pooler) closes idle connections on purpose. The pool drops the dead client and opens
+  // a new one on the next query, so this must NOT stop the server.
+  console.warn('Idle PostgreSQL client dropped (will reconnect on next query):', err.message);
 });
 
 export const query = (text: string, params?: any[]) => {

@@ -1,0 +1,23 @@
+// Dummy environment so config/env.ts loads. No real services are contacted.
+Object.assign(process.env, {
+  NODE_ENV: 'test',
+  PORT: '0',
+  TRUST_PROXY: '1',
+  PARENT_GATE_REQUIRED: 'true',
+  USE_DB_BRANCH: 'false',
+  DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/none',
+  ALLOWED_ORIGINS: 'http://localhost:5173,https://app.example.com',
+  JWT_ACCESS_SECRET: 'a'.repeat(40),
+  JWT_REFRESH_SECRET: 'b'.repeat(40),
+  BREVO_API_KEY: 'x',
+  MAIL_FROM_NAME: 'x',
+  MAIL_FROM_EMAIL: 'x@example.com',
+  MPESA_CONSUMER_KEY: 'x',
+  MPESA_CONSUMER_SECRET: 'x',
+  MPESA_SHORTCODE: '174379',
+  MPESA_PASSKEY: 'x',
+  MPESA_CALLBACK_URL: 'https://api.example.com/api/v1/mpesa/callback',
+  MPESA_C2B_VALIDATION_URL: 'https://api.example.com/api/v1/mpesa/c2b/validate',
+  MPESA_C2B_CONFIRMATION_URL: 'https://api.example.com/api/v1/mpesa/c2b/confirm',
+  MPESA_CALLBACK_SECRET: 'test_secret_' + 'c'.repeat(30),
+});

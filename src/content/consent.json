@@ -1,0 +1,13 @@
+{
+  "_README": "THIS IS THE ONE PLACE THE PARENT-CONSENT WORDING LIVES. To change the wording: edit 'items' below AND change 'version' (for example 2026-12-v2). The version is stored with every consent, and parents whose children were consented under an older version are asked to read and accept the new text again. A lawyer must review this text before launch ('draft' must become false afterwards).",
+  "version": "2026-11-draft-1",
+  "draft": true,
+  "title": "Parent consent for a child profile",
+  "items": [
+    { "key": "guardian", "text": "I am this child’s parent or legal guardian, and I am 18 or older." },
+    { "key": "data_collected", "text": "AKILI will keep only: a nickname, the child’s age (or birth year), an avatar, a PIN, and learning progress (lessons done, points, badges, code and answers the child submits)." },
+    { "key": "not_collected", "text": "AKILI will not collect photos, location, a full name, or contacts, will not show ads, and will not let children chat with strangers." },
+    { "key": "purpose", "text": "This information is used only to run lessons, track progress for me, and keep the account safe. It is not sold or shared with advertisers." },
+    { "key": "rights", "text": "I can see, download, and delete everything about my child at any time from my dashboard, and I can switch my child’s account off." }
+  ]
+}

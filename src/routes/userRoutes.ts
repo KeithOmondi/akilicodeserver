@@ -1,94 +1,24 @@
-// routes/userRoutes.ts
 import { Router } from 'express';
-import {
-  registerParent,
-  loginParent,
-  verifyEmail,
-  resendVerification,
-  forgotPassword,
-  resetPassword,
-  getParentProfile,
-  updateParentProfile,
-  changePassword,
-  requestAccountDeletion,
-  enableTwoFactor,
-  disableTwoFactor,
-  loginKid,
-  logoutKid,
-  createKidAccount,
-  getParentKids,
-  getKidById,
-  updateKidProfile,
-  deleteKidAccount,
-  updateKidPin,
-  unlockKidPin,
-  updateKidSessionTimeout,
-  revokeConsent,
-  updateGranularConsent,
-  getKidActivity,
-  getAllUsers,
-  getUserById,
-  updateUserRole,
-  adminDeleteUser,
-} from '../controllers/userController';
+import { getAllUsers, getUserById, adminDeleteUser, updateUserRole } from '../controllers/accountController';
 import { isAuthenticated, isAuthorized } from '../middleware/authMiddleware';
+import { validate } from '../middleware/validate';
+import { userIdParam, updateRoleSchema } from '../validators/admin.validators';
 
+/**
+ * Mounted at /api/v1/admin/users — ADMIN ONLY.
+ *
+ * This file used to also expose a second, unfinished copy of registration, login,
+ * password reset, child login and consent (e.g. POST /api/v1/admin/users/auth/register).
+ * Those routes were public, unrated, and written for database columns that do not
+ * exist, so they have been removed. The real ones live under /api/v1/auth and /api/v1/kids.
+ * (The admin routes were also mounted one level too deep, so the admin Users page got a 404.)
+ */
 const router = Router();
+const admin = [isAuthenticated, isAuthorized('admin')];
 
-// ─── PUBLIC AUTH ──────────────────────────────────────────────────────────────
-
-router.post('/auth/register', registerParent);
-router.post('/auth/login', loginParent);
-router.get('/auth/verify-email/:token', verifyEmail);
-router.post('/auth/resend-verification', resendVerification);
-router.post('/auth/forgot-password', forgotPassword);
-router.post('/auth/reset-password/:token', resetPassword);
-
-// ─── KID AUTH ─────────────────────────────────────────────────────────────────
-
-router.post('/auth/kid/login', loginKid);
-router.post('/auth/kid/logout', isAuthenticated, isAuthorized('kid'), logoutKid);
-
-// ─── PARENT PROFILE ───────────────────────────────────────────────────────────
-
-router.get('/parent/profile', isAuthenticated, isAuthorized('parent'), getParentProfile);
-router.patch('/parent/profile', isAuthenticated, isAuthorized('parent'), updateParentProfile);
-router.patch('/parent/change-password', isAuthenticated, isAuthorized('parent'), changePassword);
-router.delete('/parent/account', isAuthenticated, isAuthorized('parent'), requestAccountDeletion);
-
-// ─── TWO-FACTOR AUTH ──────────────────────────────────────────────────────────
-
-router.post('/parent/2fa/enable', isAuthenticated, isAuthorized('parent'), enableTwoFactor);
-router.post('/parent/2fa/disable', isAuthenticated, isAuthorized('parent'), disableTwoFactor);
-
-// ─── KID MANAGEMENT ───────────────────────────────────────────────────────────
-
-router.post('/parent/kids', isAuthenticated, isAuthorized('parent'), createKidAccount);
-router.get('/parent/kids', isAuthenticated, isAuthorized('parent'), getParentKids);
-router.get('/parent/kids/:kidId', isAuthenticated, isAuthorized('parent'), getKidById);
-router.patch('/parent/kids/:kidId', isAuthenticated, isAuthorized('parent'), updateKidProfile);
-router.delete('/parent/kids/:kidId', isAuthenticated, isAuthorized('parent'), deleteKidAccount);
-
-// ─── KID PIN & SESSION ────────────────────────────────────────────────────────
-
-router.patch('/parent/kids/:kidId/pin', isAuthenticated, isAuthorized('parent'), updateKidPin);
-router.post('/parent/kids/:kidId/pin/unlock', isAuthenticated, isAuthorized('parent'), unlockKidPin);
-router.patch('/parent/kids/:kidId/session', isAuthenticated, isAuthorized('parent'), updateKidSessionTimeout);
-
-// ─── CONSENT ──────────────────────────────────────────────────────────────────
-
-router.delete('/parent/kids/:kidId/consent', isAuthenticated, isAuthorized('parent'), revokeConsent);
-router.patch('/parent/kids/:kidId/consent', isAuthenticated, isAuthorized('parent'), updateGranularConsent);
-
-// ─── KID ACTIVITY ─────────────────────────────────────────────────────────────
-
-router.get('/parent/kids/:kidId/activity', isAuthenticated, isAuthorized('parent'), getKidActivity);
-
-// ─── ADMIN ────────────────────────────────────────────────────────────────────
-
-router.get('/admin/users', isAuthenticated, isAuthorized('admin'), getAllUsers);
-router.get('/admin/users/:userId', isAuthenticated, isAuthorized('admin'), getUserById);
-router.patch('/admin/users/:userId/role', isAuthenticated, isAuthorized('admin'), updateUserRole);
-router.delete('/admin/users/:userId', isAuthenticated, isAuthorized('admin'), adminDeleteUser);
+router.get('/', ...admin, getAllUsers);
+router.get('/:userId', ...admin, validate(userIdParam, 'params'), getUserById);
+router.patch('/:userId/role', ...admin, validate(userIdParam, 'params'), validate(updateRoleSchema), updateUserRole);
+router.delete('/:userId', ...admin, validate(userIdParam, 'params'), adminDeleteUser);
 
 export default router;

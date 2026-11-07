@@ -36,8 +36,7 @@ export const sendPaymentReminders = async () => {
         }),
       });
 
-      console.log(`Reminder sent to ${enrollment.parent_email} for ${enrollment.course_name}`);
-    }
+          }
 
     console.log(`Payment reminders sent: ${result.rows.length}`);
   } catch (error) {

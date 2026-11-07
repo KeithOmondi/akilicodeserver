@@ -1,14 +1,12 @@
-// types/express/index.d.ts
-import { IUser } from '../interfaces/user.interface';
-import { IKid } from '../interfaces/kid.interface';
+import { IUser } from '../../interfaces/user.interface';
+import { IKid } from '../../interfaces/kid.interface';
 
 declare global {
   namespace Express {
     interface Request {
-      user?: IUser | IKid;  // for parent/admin routes
-      kid?: IKid;           // for kid-specific routes
+      user?: IUser | IKid;
     }
   }
 }
 
-export {};
+export {}; // ← makes this a module, activating the global augmentation
