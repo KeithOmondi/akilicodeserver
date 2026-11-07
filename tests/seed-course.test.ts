@@ -56,7 +56,7 @@ test('without the course, nothing is created and the reason is clear', async () 
 });
 
 test('preview writes nothing; apply writes once; a second run changes nothing', async () => {
-  await db.query(`INSERT INTO courses (title, description, price) VALUES ('Programming','x',100)`);
+  await db.query(`INSERT INTO courses (title, description, price) VALUES ('Programming Basics','x',100)`);
   const preview = await seedCourse(client(), content);
   assert.equal(preview.ok, true);
   assert.equal(preview.applied, false);
@@ -80,10 +80,10 @@ test('seeded questions grade correctly with the real answer index', async () => 
 
 test('the web module can be added next to the first one, and twice does nothing', async () => {
   const first = await seedCourse(client(), content, { apply: true });
-  const second = await seedCourse(client(), web, { apply: true });
+  const second = await seedCourse(client(), web, { apply: true, createCourse: true, price: '4000' });
   assert.equal(first.skipped === true || first.applied === true, true);
   assert.ok(second.applied === true || second.skipped === true);
-  const again = await seedCourse(client(), web, { apply: true });
+  const again = await seedCourse(client(), web, { apply: true, createCourse: true, price: '4000' });
   assert.equal(again.skipped, true);
   const mods = (await db.query(`SELECT title FROM modules ORDER BY order_index`)).rows.map((r: any) => r.title);
   assert.ok(mods.includes('Programming for Everyone') && mods.includes('Build Your First Web Page'));
@@ -139,9 +139,13 @@ test('a course that does not exist is only created when asked, with a price you 
 
 test('each age group sees only its own modules in each course, in the right order', async () => {
   await db.query('DELETE FROM courses');
-  await db.query("INSERT INTO courses (title, description, price) VALUES ('Programming','x',100)");
-  for (const c of [content, web]) assert.equal((await seedCourse(client(), c, { apply: true })).applied, true);
-  for (const c of [tots, explorers]) assert.equal((await seedCourse(client(), c, { apply: true, createCourse: true, price: '1500' })).applied, true);
+  // the whole starter catalogue, exactly as the real run does it
+  for (const c of [tots, explorers, content, web]) assert.equal((await seedCourse(client(), c, { apply: true, createCourse: true, price: '4000' })).applied, true);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM courses')).rows[0].n, 3);
+  const paths = (await db.query('SELECT title, path_order, age_groups FROM courses ORDER BY path_order')).rows;
+  assert.deepEqual(paths.map((p: any) => p.title), ['Scratch Adventures', 'Programming Basics', 'Web Foundations']);
+  assert.deepEqual(paths.map((p: any) => p.path_order), [1, 2, 3]);
+  assert.deepEqual(paths[1].age_groups, ['7-9', '10-12', '13-15', '16-18']);
 
   const parent = (await db.query("INSERT INTO users (name,email,phone,password,is_verified) VALUES ('P','order@x.co','0799000111','x',true) RETURNING id")).rows[0].id;
   const seen = async (group: string, course: string) => {
@@ -161,8 +165,13 @@ test('each age group sees only its own modules in each course, in the right orde
   assert.deepEqual(await seen('10-12', 'Scratch Adventures'), [block]);
   assert.deepEqual(await seen('13-15', 'Scratch Adventures'), []);
   assert.deepEqual(await seen('16-18', 'Scratch Adventures'), []);
-  assert.deepEqual(await seen('4-6', 'Programming'), [intro]);
-  assert.deepEqual(await seen('10-12', 'Programming'), [intro, webm]);
-  assert.deepEqual(await seen('13-15', 'Programming'), [intro, webm]);
-  assert.deepEqual(await seen('16-18', 'Programming'), [intro, webm]);
+  assert.deepEqual(await seen('4-6', 'Programming Basics'), []);
+  assert.deepEqual(await seen('7-9', 'Programming Basics'), [intro]);
+  assert.deepEqual(await seen('10-12', 'Programming Basics'), [intro]);
+  assert.deepEqual(await seen('13-15', 'Programming Basics'), [intro]);
+  assert.deepEqual(await seen('4-6', 'Web Foundations'), []);
+  assert.deepEqual(await seen('7-9', 'Web Foundations'), []);
+  assert.deepEqual(await seen('10-12', 'Web Foundations'), [webm]);
+  assert.deepEqual(await seen('13-15', 'Web Foundations'), [webm]);
+  assert.deepEqual(await seen('16-18', 'Web Foundations'), [webm]);
 });

@@ -9,7 +9,15 @@
  *   node scripts/seed-course.js --branch --content programming-web --apply    (write)
  */
 module.exports = {
-  courseTitle: 'Programming',
+  courseTitle: 'Web Foundations',
+  /** Used only when the course has to be created (price comes from the command line). */
+  course: {
+    description: 'Build a real web page with HTML, CSS and JavaScript in the built-in editor. Learn what each language does, then make something that is yours and hand it in for feedback.',
+    duration: '3 lessons',
+    category: 'Coding & Logic',
+    ageGroups: ['10-12', '13-15', '16-18'],
+    pathOrder: 3,
+  },
   module: {
     title: 'Build Your First Web Page',
     description: 'Make a real web page in the editor with HTML, CSS and JavaScript, and hand it in.',

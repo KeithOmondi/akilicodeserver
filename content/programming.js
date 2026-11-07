@@ -12,10 +12,19 @@
  *                         node scripts/seed-course.js --branch --apply    (write)
  */
 module.exports = {
-  courseTitle: 'Programming',
+  courseTitle: 'Programming Basics',
+  /** Used only when the course has to be created (price comes from the command line). */
+  course: {
+    description: 'What programming really is, explained simply: giving a computer instructions, putting them in order, repeating them and making choices. The ideas behind every program, whatever language you use later.',
+    duration: '5 lessons',
+    category: 'Coding & Logic',
+    ageGroups: ['7-9', '10-12', '13-15', '16-18'],
+    pathOrder: 2,
+  },
   module: {
     title: 'Programming for Everyone',
     description: 'What programming is, and the four big ideas behind every program: instructions, order, repeating and choosing.',
+    ageGroups: ['7-9', '10-12', '13-15', '16-18'],
   },
   lessons: [
     {
