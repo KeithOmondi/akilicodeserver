@@ -9,6 +9,8 @@ import path from 'node:path';
 const { seedCourse, check } = require('../scripts/lib/seed-course');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const content = require('../content/programming');
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const web = require('../content/programming-web');
 
 let db: any;
 const client = () => ({ query: async (sql: string, p?: any[]) => { const r = await db.query(sql, p); return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length }; } });
@@ -28,6 +30,13 @@ test('the Programming content is valid: 5 lessons, 10 questions, every answer po
   assert.ok(content.lessons.every((l: any) => l.questions.length === 2 && l.assignment));
   // answers are spread around, not always the same position
   assert.ok(new Set(content.lessons.flatMap((l: any) => l.questions.map((q: any) => q.answer))).size >= 3);
+});
+
+test('the web-page module is valid and its notes never contain raw HTML tags (they must be shown, not obeyed)', async () => {
+  assert.deepEqual(check(web), []);
+  assert.equal(web.lessons.length, 3);
+  assert.ok(web.lessons.every((l: any) => l.questions.length === 2 && l.assignment));
+  for (const l of [...web.lessons, ...content.lessons]) assert.ok(!/<\/?[a-z][a-z0-9]*[ >]/i.test(l.notes), 'raw tag in: ' + l.title);
 });
 
 test('notes avoid more than one bullet list (the lesson page renderer merges lists)', () => {
@@ -62,4 +71,15 @@ test('preview writes nothing; apply writes once; a second run changes nothing', 
 test('seeded questions grade correctly with the real answer index', async () => {
   const q = (await db.query(`SELECT options, answer FROM lesson_questions LIMIT 1`)).rows[0];
   assert.ok(Array.isArray(q.options) && q.options.length === 4 && q.answer >= 0 && q.answer < 4);
+});
+
+test('the web module can be added next to the first one, and twice does nothing', async () => {
+  const first = await seedCourse(client(), content, { apply: true });
+  const second = await seedCourse(client(), web, { apply: true });
+  assert.equal(first.skipped === true || first.applied === true, true);
+  assert.ok(second.applied === true || second.skipped === true);
+  const again = await seedCourse(client(), web, { apply: true });
+  assert.equal(again.skipped, true);
+  const mods = (await db.query(`SELECT title FROM modules ORDER BY order_index`)).rows.map((r: any) => r.title);
+  assert.ok(mods.includes('Programming for Everyone') && mods.includes('Build Your First Web Page'));
 });

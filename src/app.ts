@@ -21,6 +21,7 @@ import pricingRoutes from './routes/pricingRoutes';
 import userRoutes from "./routes/userRoutes"
 import submissionRoutes from './routes/submissionRoutes';
 import kidCalendarRoutes from './routes/kidCalendarRoutes';
+import { kidProjectRoutes, adminProjectRoutes } from './routes/projectRoutes';
 import { apiLimiter } from './middleware/rateLimiters';
 
 const app: Application = express();
@@ -47,6 +48,7 @@ app.use(cookieParser()); // ← add this, must be before routes
 // Body size limits. The default is small; only routes that really carry big text get more.
 // (A parser mounted first wins: later ones skip a request whose body is already read.)
 app.use(['/api/v1/blog', '/api/v1/courses'], express.json({ limit: '512kb' })); // admin lesson notes, blog posts
+app.use('/api/v1/kid/projects', express.json({ limit: '200kb' })); // a child's HTML + CSS + JS (each file is also capped in the validator)
 app.use(['/api/v1/learning', '/api/v1/kids/courses', '/api/v1/submissions'], express.json({ limit: '64kb' })); // code a child types
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
@@ -79,6 +81,8 @@ app.use("/api/v1/learning", kidLearningRoutes)
 app.use('/api/v1/pricing', pricingRoutes);
 app.use('/api/v1/submissions', submissionRoutes);
 app.use('/api/v1/kid/calendar', kidCalendarRoutes);
+app.use('/api/v1/kid/projects', kidProjectRoutes);
+app.use('/api/v1/admin/projects', adminProjectRoutes);
 
 app.use(notFound);
 app.use(globalErrorHandler);
