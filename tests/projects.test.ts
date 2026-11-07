@@ -153,3 +153,16 @@ test('request validation: oversized code, bad marks and unknown fields are rejec
   const stripped = V.saveProjectSchema.parse({ html: 'a', kid_id: 'someone-else', submitted_at: 'now' });
   assert.deepEqual(Object.keys(stripped), ['html']);
 });
+
+test('block projects may carry small painted pictures, but only real image data and not too much of it', () => {
+  const V = require('../src/validators/project.validators');
+  const sprite = (src: string) => ({ v: 3, sprites: [{ id: 's1', name: 'Cat', costumes: [{ id: 'c1', name: 'x', src }], blocks: null }] });
+  const ok = (src: string) => V.saveProjectSchema.safeParse({ blocks: sprite(src) }).success;
+  assert.equal(ok('lib:1f431'), true);
+  assert.equal(ok('emoji:🐱'), true);
+  assert.equal(ok('data:image/webp;base64,UklGRg=='), true);
+  assert.equal(ok('data:image/png;base64,iVBORw0KGgo='), true);
+  assert.equal(ok('data:text/html;base64,PHNjcmlwdD4='), false); // not an image
+  assert.equal(ok('data:image/svg+xml;base64,PHN2Zz4='), false); // svg can carry scripts: not allowed
+  assert.equal(V.saveProjectSchema.safeParse({ blocks: sprite('data:image/png;base64,' + 'A'.repeat(1_600_000)) }).success, false);
+});

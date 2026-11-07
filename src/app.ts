@@ -48,7 +48,7 @@ app.use(cookieParser()); // ← add this, must be before routes
 // Body size limits. The default is small; only routes that really carry big text get more.
 // (A parser mounted first wins: later ones skip a request whose body is already read.)
 app.use(['/api/v1/blog', '/api/v1/courses'], express.json({ limit: '512kb' })); // admin lesson notes, blog posts
-app.use('/api/v1/kid/projects', express.json({ limit: '200kb' })); // a child's HTML + CSS + JS (each file is also capped in the validator)
+app.use('/api/v1/kid/projects', express.json({ limit: '2mb' })); // a child's HTML + CSS + JS, or blocks with painted pictures (each part is also capped in the validator)
 app.use(['/api/v1/learning', '/api/v1/kids/courses', '/api/v1/submissions'], express.json({ limit: '64kb' })); // code a child types
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
