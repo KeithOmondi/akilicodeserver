@@ -166,11 +166,14 @@ export const getLesson = async (req: Request, res: Response, next: NextFunction)
       [kidId, lessonId, enrollmentId]
     );
 
+    // A child must never receive the teacher's solution.
+    const { solution_code: _solution, ...lessonForKid } = lessonResult.rows[0];
+
     res.status(200).json({
       status: 'success',
       data: {
         lesson: {
-          ...lessonResult.rows[0],
+          ...lessonForKid,
           completed: progressResult.rows[0]?.completed || false,
           points_earned: progressResult.rows[0]?.points_earned || 0,
           code_submitted: progressResult.rows[0]?.code_submitted || null,
