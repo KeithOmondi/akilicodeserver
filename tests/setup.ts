@@ -20,4 +20,5 @@ Object.assign(process.env, {
   MPESA_C2B_VALIDATION_URL: 'https://api.example.com/api/v1/mpesa/c2b/validate',
   MPESA_C2B_CONFIRMATION_URL: 'https://api.example.com/api/v1/mpesa/c2b/confirm',
   MPESA_CALLBACK_SECRET: 'test_secret_' + 'c'.repeat(30),
+  PAYSTACK_SECRET_KEY: 'sk_test_' + 'p'.repeat(30),
 });

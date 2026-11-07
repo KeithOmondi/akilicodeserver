@@ -2,6 +2,7 @@ import { PoolClient } from 'pg';
 import pool from '../config/db';
 import env from '../config/env';
 import { querySTKStatus } from '../utils/mpesa';
+import { isValidWebhookSignature, toSubunit, verifyTransaction, PAYSTACK_CURRENCY, VerifiedTransaction } from '../utils/paystack';
 import { sendReceiptEmail } from '../utils/mailsTemplate';
 import { calculateNextPaymentDate } from '../utils/paymentSchedule';
 import { normalizeKenyanPhone } from '../validators/common';
@@ -29,6 +30,9 @@ export type PaymentRow = {
   phone: string | null;
   status: string;
   checkout_request_id: string | null;
+  paystack_reference?: string | null;
+  method?: string;
+  source?: string;
   created_at: Date;
 };
 
@@ -71,10 +75,10 @@ export const findCallbackMismatch = (
  * which the Node driver reads as *local* time; comparing it in JavaScript would be
  * wrong by hours whenever the server timezone differs from the database's.
  */
-const hasTimedOut = async (paymentId: string): Promise<boolean> => {
+const hasTimedOut = async (paymentId: string, ms: number = PENDING_TIMEOUT_MS): Promise<boolean> => {
   const { rows } = await pool.query(
     `SELECT created_at < now() - ($2 || ' milliseconds')::interval AS timed_out FROM payments WHERE id = $1`,
-    [paymentId, String(PENDING_TIMEOUT_MS)]
+    [paymentId, String(ms)]
   );
   return rows[0]?.timed_out === true;
 };
@@ -82,7 +86,7 @@ const hasTimedOut = async (paymentId: string): Promise<boolean> => {
 // ─── Event log ───────────────────────────────────────────────────────────────
 
 export const logPaymentEvent = async (e: {
-  source: 'stk_callback' | 'c2b_confirm' | 'c2b_validate' | 'stk_query';
+  source: 'stk_callback' | 'c2b_confirm' | 'c2b_validate' | 'stk_query' | 'paystack_webhook' | 'paystack_verify' | 'paystack_init';
   outcome: string;
   ip?: string;
   checkoutRequestId?: string | null;
@@ -204,7 +208,7 @@ const sendReceipt = async (paymentId: string) => {
       kid_name: r.kid_name,
       course_name: r.course_name,
       amount: r.amount,
-      method: 'M-Pesa',
+      method: r.method ?? 'M-Pesa',
       reference: r.mpesa_receipt ?? r.reference,
       date: r.date,
       description: r.description,
@@ -366,7 +370,139 @@ export const reconcilePendingPayments = async () => {
   for (const p of rows) {
     await verifyAndApplyStkThrottled(p).catch((e) => console.error('reconcile failed:', p.id, e.message));
   }
-  return rows.length;
+
+  // Paystack payments the webhook or the return page never settled
+  let psRows: any[] = [];
+  try {
+    ({ rows: psRows } = await pool.query(
+      `SELECT * FROM payments
+        WHERE source = 'paystack' AND paystack_reference IS NOT NULL
+          AND (status = 'pending' OR (status IN ('failed','expired') AND created_at > now() - interval '24 hours'))
+          AND created_at < now() - interval '30 seconds'
+          AND created_at > now() - interval '2 days'
+        ORDER BY created_at LIMIT 100`
+    ));
+  } catch (err: any) {
+    if (err?.code !== '42703') throw err; // 42703 = migration 006 not applied yet: nothing to do for Paystack
+  }
+  for (const p of psRows) {
+    await verifyAndApplyPaystackThrottled(p).catch((e) => console.error('paystack reconcile failed:', p.id, e.message));
+  }
+  return rows.length + psRows.length;
+};
+
+// ─── Paystack (card or mobile money): confirm with Paystack, then apply ─────────
+//
+// Same trust model as M-Pesa:
+//  - the amount we charge comes from OUR database, never from the browser;
+//  - a webhook (or the page the parent returns to) is only a hint: we ask Paystack directly before unlocking anything;
+//  - the money Paystack reports must match what we asked for (amount, currency, reference), otherwise a person reviews it;
+//  - finalizeSuccess() is the only thing that completes a payment, and it can only win once.
+
+/** How long a Paystack payment may stay unfinished before it is shown as timed out (it can still be settled later). */
+const PAYSTACK_PENDING_MS = 60 * 60 * 1000;
+
+/** Pure decision: does what Paystack reports match what we asked for? Returns a reason when it does not. */
+export const findPaystackMismatch = (
+  payment: Pick<PaymentRow, 'amount' | 'paystack_reference'>,
+  tx: Pick<VerifiedTransaction, 'amount' | 'currency' | 'reference'>
+): string | null => {
+  if (tx.reference !== payment.paystack_reference) return 'reference mismatch';
+  if (tx.currency !== PAYSTACK_CURRENCY) return `currency mismatch: expected ${PAYSTACK_CURRENCY}, got ${tx.currency}`;
+  if (Number(tx.amount) !== toSubunit(payment.amount)) {
+    return `amount mismatch: expected ${toSubunit(payment.amount)}, got ${tx.amount}`;
+  }
+  return null;
+};
+
+export const findPaymentByPaystackRef = async (reference: string): Promise<PaymentRow | null> => {
+  const { rows } = await pool.query(`SELECT * FROM payments WHERE paystack_reference = $1 AND source = 'paystack'`, [reference]);
+  return rows[0] ?? null;
+};
+
+export const verifyAndApplyPaystack = async (payment: PaymentRow): Promise<PaymentOutcome> => {
+  const ref = payment.paystack_reference;
+  if (!ref) return 'unknown';
+
+  let tx: VerifiedTransaction;
+  try {
+    tx = await verifyTransaction(ref);
+  } catch (err: any) {
+    // Paystack unreachable, or it has no record yet (the parent has not opened the page). Never guess.
+    const d = err?.response?.data;
+    const reason = `HTTP ${err?.response?.status ?? 'none'} ${d?.message ?? err?.message ?? ''}`.trim();
+    console.warn(`[paystack-verify] ${ref}: ${reason}`);
+    const lastLogged = lastErrorLog.get(payment.id);
+    if (!lastLogged || Date.now() - lastLogged > 30000) {
+      lastErrorLog.set(payment.id, Date.now());
+      forgetOld(lastErrorLog);
+      await logPaymentEvent({ source: 'paystack_verify', outcome: `error ${err?.response?.status ?? 'none'}`, checkoutRequestId: ref, payload: { reason } }).catch(() => undefined);
+    }
+    if (await hasTimedOut(payment.id, PAYSTACK_PENDING_MS)) {
+      await markFailed(payment.id, null, 'The payment page was not completed in time', 'expired');
+      return 'expired';
+    }
+    return 'pending';
+  }
+
+  await logPaymentEvent({
+    source: 'paystack_verify',
+    outcome: `status ${String(tx.status).slice(0, 30)}`,
+    checkoutRequestId: ref,
+    payload: { status: tx.status, amount: tx.amount, currency: tx.currency, channel: tx.channel, gateway_response: tx.gateway_response },
+  });
+
+  if (tx.status === 'success') {
+    const mismatch = findPaystackMismatch(payment, tx);
+    if (mismatch) {
+      await markReview(payment.id, mismatch);
+      return 'review';
+    }
+    const won = await finalizeSuccess(payment.id, { receipt: null, allowedFrom: ['pending', 'expired', 'failed'] });
+    return won ? 'completed' : 'duplicate';
+  }
+
+  if (tx.status === 'failed' || tx.status === 'reversed') {
+    await markFailed(payment.id, null, String(tx.gateway_response ?? tx.status));
+    return 'failed';
+  }
+
+  // abandoned | ongoing | pending | queued: not finished. Stays open for a while, then shows as timed out.
+  if (await hasTimedOut(payment.id, PAYSTACK_PENDING_MS)) {
+    await markFailed(payment.id, null, 'The payment page was not completed in time', 'expired');
+    return 'expired';
+  }
+  return 'pending';
+};
+
+/** Safe for polling: at most one question to Paystack per payment every few seconds. */
+export const verifyAndApplyPaystackThrottled = async (payment: PaymentRow): Promise<PaymentOutcome> => {
+  const last = lastCheck.get(payment.id);
+  if (last && Date.now() - last < 3000) return 'pending';
+  lastCheck.set(payment.id, Date.now());
+  forgetOld(lastCheck);
+  return verifyAndApplyPaystack(payment);
+};
+
+/**
+ * A webhook from Paystack. We only act if the signature proves it is theirs, and even then it is a hint:
+ * the money is confirmed by asking Paystack (verify), not by believing the webhook body.
+ */
+export const handlePaystackWebhook = async (rawBody: Buffer, signature: string | undefined): Promise<string> => {
+  if (!isValidWebhookSignature(rawBody, signature)) return 'bad_signature';
+  let event: any;
+  try {
+    event = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    return 'malformed';
+  }
+  if (event?.event !== 'charge.success') return `ignored ${String(event?.event ?? '').slice(0, 25)}`;
+  const ref = String(event?.data?.reference ?? '');
+  if (!ref) return 'malformed';
+  const payment = await findPaymentByPaystackRef(ref);
+  if (!payment) return 'unknown_reference';
+  if (!['pending', 'expired', 'failed'].includes(payment.status)) return 'duplicate';
+  return verifyAndApplyPaystack(payment);
 };
 
 // ─── C2B (Paybill paid directly, no STK request on our side) ─────────────────

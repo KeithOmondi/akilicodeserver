@@ -12,6 +12,7 @@ import kidRoutes from "./routes/kidRoutes";
 import enrollmentRoutes from './routes/enrollmentRoutes';
 import paymentRoutes from './routes/paymentRoutes';
 import mpesaRoutes from './routes/mpesaRoutes';
+import paystackRoutes from './routes/paystackRoutes';
 import courseRoutes from "./routes/courseRoutes"
 import trialRoutes from "./routes/trialRoutes"
 import blogRoutes from "./routes/blogRoutes"
@@ -47,6 +48,8 @@ app.use(hpp());
 app.use(cookieParser()); // ← add this, must be before routes
 // Body size limits. The default is small; only routes that really carry big text get more.
 // (A parser mounted first wins: later ones skip a request whose body is already read.)
+// Paystack signs the EXACT bytes it sends, so its webhook is read raw (the signature is checked in the controller).
+app.use('/api/v1/paystack/webhook', express.raw({ type: '*/*', limit: '64kb' }));
 app.use(['/api/v1/blog', '/api/v1/courses'], express.json({ limit: '512kb' })); // admin lesson notes, blog posts
 app.use('/api/v1/kid/projects', express.json({ limit: '2mb' })); // a child's HTML + CSS + JS, or blocks with painted pictures (each part is also capped in the validator)
 app.use(['/api/v1/learning', '/api/v1/kids/courses', '/api/v1/submissions'], express.json({ limit: '64kb' })); // code a child types
@@ -73,6 +76,7 @@ app.use('/api/v1/kids', kidRoutes);
 app.use('/api/v1/enrollments', enrollmentRoutes);
 app.use('/api/v1/payments', paymentRoutes);
 app.use('/api/v1/mpesa', mpesaRoutes);
+app.use('/api/v1/paystack', paystackRoutes);
 app.use('/api/v1/courses', courseRoutes)
 app.use('/api/v1/trials', trialRoutes)
 app.use('/api/v1/blog', blogRoutes)

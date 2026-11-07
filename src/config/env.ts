@@ -41,6 +41,11 @@ interface Config {
   MPESA_TRANSACTION_TYPE: 'CustomerPayBillOnline' | 'CustomerBuyGoodsOnline';
   /** Who receives the money: the Paybill number, or the Till number for Buy Goods. */
   MPESA_PARTY_B: string;
+  /**
+   * Paystack secret key (sk_test_... or sk_live_...). Empty = Paystack is switched off and the card option is hidden.
+   * This key can move money: it lives only in the server's environment, never in the code or the browser.
+   */
+  PAYSTACK_SECRET_KEY: string;
   /** SMS provider: "console" prints codes to the server log (dev/test only). */
   SMS_PROVIDER: 'console' | 'africastalking';
   AT_USERNAME: string;
@@ -136,6 +141,14 @@ const getSanitizedConfig = (config: NodeJS.ProcessEnv): Config => {
     origins.push('http://localhost:5173');
   }
 
+  const paystackKey = (config.PAYSTACK_SECRET_KEY ?? '').trim();
+  if (paystackKey && !/^sk_(test|live)_[A-Za-z0-9]+$/.test(paystackKey)) {
+    throw new Error('❌ PAYSTACK_SECRET_KEY must be a Paystack SECRET key (starts with sk_test_ or sk_live_). Never use the public key (pk_...) here.');
+  }
+  if (isProduction && paystackKey.startsWith('sk_test_')) {
+    console.warn('⚠️  PAYSTACK_SECRET_KEY is a TEST key in production: card payments will not move real money.');
+  }
+
   if (config.SMS_PROVIDER === 'africastalking' && !config.AT_API_KEY) {
     throw new Error('❌ SMS_PROVIDER=africastalking needs AT_API_KEY (and AT_USERNAME)');
   }
@@ -165,6 +178,7 @@ const getSanitizedConfig = (config: NodeJS.ProcessEnv): Config => {
     MPESA_CONSUMER_SECRET: config.MPESA_CONSUMER_SECRET!,
     MPESA_SHORTCODE: config.MPESA_SHORTCODE!,
     MPESA_PASSKEY: config.MPESA_PASSKEY!,
+    PAYSTACK_SECRET_KEY: paystackKey,
     MPESA_CALLBACK_URL: config.MPESA_CALLBACK_URL!.replace(/\/$/, ''),
     MPESA_C2B_VALIDATION_URL: config.MPESA_C2B_VALIDATION_URL!.replace(/\/$/, ''),
     MPESA_C2B_CONFIRMATION_URL: config.MPESA_C2B_CONFIRMATION_URL!.replace(/\/$/, ''),

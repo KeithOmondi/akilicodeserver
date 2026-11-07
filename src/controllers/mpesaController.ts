@@ -11,6 +11,7 @@ import {
   resolveReview,
   verifyAndApplyStk,
   verifyAndApplyStkThrottled,
+  verifyAndApplyPaystackThrottled,
   CallbackItems,
 } from '../services/paymentService';
 
@@ -174,7 +175,7 @@ export const checkPaymentStatus = async (req: Request, res: Response, next: Next
 
     const latest = await pool.query(
       `SELECT * FROM payments
-        WHERE enrollment_id = $1 AND parent_id = $2 AND method = 'M-Pesa'
+        WHERE enrollment_id = $1 AND parent_id = $2 AND source IN ('stk', 'paystack')
         ORDER BY created_at DESC LIMIT 1`,
       [enrollmentId, parentId]
     );
@@ -186,11 +187,16 @@ export const checkPaymentStatus = async (req: Request, res: Response, next: Next
 
     const age = Date.now() - new Date(payment.created_at).getTime();
     // A payment marked failed (30 min) or timed out (6 h) can still be corrected if Safaricom later says it went through.
-    const recheck = (payment.status === 'failed' && age < 30 * 60 * 1000) || (payment.status === 'expired' && age < 6 * 3600 * 1000);
-    if ((payment.status === 'pending' || recheck) && payment.source === 'stk') {
-      await verifyAndApplyStkThrottled(payment);
-      const refreshed = await pool.query('SELECT status, result_code FROM payments WHERE id = $1', [payment.id]);
-      payment = { ...payment, status: refreshed.rows[0]?.status ?? payment.status, result_code: refreshed.rows[0]?.result_code ?? null };
+    const isCard = payment.source === 'paystack';
+    // Card payments can be paid late on the Paystack page, so they are rechecked for a day.
+    const recheck = isCard
+      ? (payment.status === 'failed' || payment.status === 'expired') && age < 24 * 3600 * 1000
+      : (payment.status === 'failed' && age < 30 * 60 * 1000) || (payment.status === 'expired' && age < 6 * 3600 * 1000);
+    if (payment.status === 'pending' || recheck) {
+      if (isCard) await verifyAndApplyPaystackThrottled(payment);
+      else await verifyAndApplyStkThrottled(payment);
+      const refreshed = await pool.query('SELECT status, result_code, result_desc FROM payments WHERE id = $1', [payment.id]);
+      payment = { ...payment, status: refreshed.rows[0]?.status ?? payment.status, result_code: refreshed.rows[0]?.result_code ?? null, result_desc: refreshed.rows[0]?.result_desc ?? payment.result_desc };
     }
 
     const enr = await pool.query('SELECT status FROM enrollments WHERE id = $1 AND parent_id = $2', [enrollmentId, parentId]);
@@ -213,8 +219,14 @@ export const checkPaymentStatus = async (req: Request, res: Response, next: Next
         // pending | completed | failed | expired | review
         payment_status: payment.status,
         enrollment_status: enr.rows[0]?.status,
+        method: payment.method,
         ...(payment.status === 'failed' || payment.status === 'expired'
-          ? { reason: (code !== null && FRIENDLY[code]) || 'M-Pesa did not complete the payment.', result_code: code }
+          ? {
+              reason: isCard
+                ? (payment.result_desc ? `The card payment did not go through (${payment.result_desc}).` : 'The card payment did not go through.')
+                : (code !== null && FRIENDLY[code]) || 'M-Pesa did not complete the payment.',
+              result_code: code,
+            }
           : {}),
       },
     });
