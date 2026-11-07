@@ -1,5 +1,5 @@
 /**
- * Paystack (card / mobile money). Runs the REAL payment SQL against an in-process Postgres (pglite).
+ * Paystack (cards only; M-Pesa has its own integration). Runs the REAL payment SQL against an in-process Postgres (pglite).
  * Paystack itself is replaced by a fake that answers "what really happened to this reference?".
  * The rules under test: nothing is unlocked until Paystack confirms it, the money must match, a payment is
  * completed at most once, and a webhook is only a hint (and must carry a valid signature).
@@ -100,6 +100,15 @@ test('amounts are sent to Paystack in the smallest unit (KES 4,000 is 400000)', 
   assert.equal(ps.toSubunit(4000), 400000);
   assert.equal(ps.toSubunit('1500.50'), 150050);
   assert.equal(ps.toSubunit(0.1 + 0.2), 30); // no floating point drift
+});
+
+test('the request to Paystack offers cards only, in KES, with the amount in the smallest unit', () => {
+  const body = ps.buildInitializeBody({ email: 'a@b.co', amountKes: 4000, reference: 'AKREF123', callbackUrl: 'https://app.example.com/parent/programs', metadata: { x: 1 } });
+  assert.deepEqual(body.channels, ['card']); // no mobile money / M-Pesa on Paystack's page
+  assert.equal(body.currency, 'KES');
+  assert.equal(body.amount, 400000);
+  assert.equal(body.reference, 'AKREF123');
+  assert.equal(body.callback_url, 'https://app.example.com/parent/programs');
 });
 
 test('webhook signature: only HMAC-SHA512 of the exact body with our secret key is accepted', () => {

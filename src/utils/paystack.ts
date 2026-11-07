@@ -4,7 +4,8 @@ import env from '../config/env';
 
 /**
  * Talking to Paystack. Three things only:
- *  - start a payment (initialize)  -> a page the parent is sent to, to pay by card or mobile money
+ *  - start a payment (initialize)  -> a page the parent is sent to, to pay by CARD
+ *    (mobile money / M-Pesa is NOT offered here: M-Pesa is paid through our own direct M-Pesa integration)
  *  - ask Paystack what really happened (verify)
  *  - check that a webhook really came from Paystack (signature)
  *
@@ -27,6 +28,21 @@ const client = () =>
     headers: { Authorization: `Bearer ${env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
   });
 
+/** Paystack is used for cards only. */
+export const PAYSTACK_CHANNELS = ['card'] as const;
+
+/** The request we send to Paystack to start a payment (a separate function so it can be tested). */
+export const buildInitializeBody = (p: { email: string; amountKes: number; reference: string; callbackUrl: string; metadata?: Record<string, unknown> }) => ({
+  email: p.email,
+  amount: toSubunit(p.amountKes),
+  currency: PAYSTACK_CURRENCY,
+  reference: p.reference,
+  callback_url: p.callbackUrl,
+  // only the card option is shown on Paystack's page, whatever else the Paystack account has switched on
+  channels: [...PAYSTACK_CHANNELS],
+  metadata: p.metadata ?? {},
+});
+
 export type InitializeResult = { authorization_url: string; access_code: string; reference: string };
 
 export const initializeTransaction = async (p: {
@@ -36,14 +52,7 @@ export const initializeTransaction = async (p: {
   callbackUrl: string;
   metadata?: Record<string, unknown>;
 }): Promise<InitializeResult> => {
-  const res = await client().post('/transaction/initialize', {
-    email: p.email,
-    amount: toSubunit(p.amountKes),
-    currency: PAYSTACK_CURRENCY,
-    reference: p.reference,
-    callback_url: p.callbackUrl,
-    metadata: p.metadata ?? {},
-  });
+  const res = await client().post('/transaction/initialize', buildInitializeBody(p));
   if (!res.data?.status || !res.data?.data?.authorization_url) {
     throw new Error(String(res.data?.message ?? 'Paystack did not return a payment page.'));
   }

@@ -391,7 +391,7 @@ export const reconcilePendingPayments = async () => {
   return rows.length + psRows.length;
 };
 
-// ─── Paystack (card or mobile money): confirm with Paystack, then apply ─────────
+// ─── Paystack (cards): confirm with Paystack, then apply ─────────
 //
 // Same trust model as M-Pesa:
 //  - the amount we charge comes from OUR database, never from the browser;
