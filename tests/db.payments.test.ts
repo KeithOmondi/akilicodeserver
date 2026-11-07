@@ -181,3 +181,31 @@ test('a payment wrongly marked failed is corrected when Safaricom later confirms
   assert.equal(await svc.verifyAndApplyStk(failed), 'completed');
   assert.equal((await enr(e)).payment_status, 'paid');
 });
+
+test('polling is gentle: one check per payment at a time, and a pause after Safaricom says "too many requests"', async () => {
+  const { p } = await seed();
+  stkResult = { ResultCode: '4999', ResultDesc: 'still processing' };
+  const before = stkCalls;
+  assert.equal(await svc.verifyAndApplyStkThrottled(p), 'pending');
+  assert.equal(await svc.verifyAndApplyStkThrottled(p), 'pending'); // too soon: not sent to Safaricom
+  assert.equal(await svc.verifyAndApplyStkThrottled(p), 'pending');
+  assert.equal(stkCalls - before, 1);
+
+  // a different payment is still checked (the limit is per payment)
+  const other = await seed();
+  await svc.verifyAndApplyStkThrottled(other.p);
+  assert.equal(stkCalls - before, 2);
+
+  // Safaricom rate-limits us: every payment pauses, and the reason is written to the payment log
+  const third = await seed();
+  stkResult = Object.assign(new Error('Too Many Requests'), { response: { status: 429, data: { errorCode: '500.003.02', errorMessage: 'Spike Arrest Violation' } } });
+  const mid = stkCalls;
+  assert.equal(await svc.verifyAndApplyStkThrottled(third.p), 'pending');
+  assert.equal(stkCalls - mid, 1);
+  const fourth = await seed();
+  assert.equal(await svc.verifyAndApplyStkThrottled(fourth.p), 'pending');
+  assert.equal(stkCalls - mid, 1); // paused: no further call
+  const logged = (await db.query("SELECT outcome, payload::text AS payload FROM payment_events WHERE outcome = 'error 429' LIMIT 1")).rows[0];
+  assert.ok(logged, 'the rate-limit reason was written to the payment log');
+  assert.match(logged.payload, /Spike Arrest/);
+});

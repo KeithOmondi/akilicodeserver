@@ -10,6 +10,7 @@ import {
   logPaymentEvent,
   resolveReview,
   verifyAndApplyStk,
+  verifyAndApplyStkThrottled,
   CallbackItems,
 } from '../services/paymentService';
 
@@ -183,9 +184,11 @@ export const checkPaymentStatus = async (req: Request, res: Response, next: Next
       return res.status(200).json({ status: 'success', data: { payment_status: 'not_found' } });
     }
 
-    const recentlyFailed = payment.status === 'failed' && Date.now() - new Date(payment.created_at).getTime() < 30 * 60 * 1000;
-    if ((payment.status === 'pending' || recentlyFailed) && payment.source === 'stk') {
-      await verifyAndApplyStk(payment);
+    const age = Date.now() - new Date(payment.created_at).getTime();
+    // A payment marked failed (30 min) or timed out (6 h) can still be corrected if Safaricom later says it went through.
+    const recheck = (payment.status === 'failed' && age < 30 * 60 * 1000) || (payment.status === 'expired' && age < 6 * 3600 * 1000);
+    if ((payment.status === 'pending' || recheck) && payment.source === 'stk') {
+      await verifyAndApplyStkThrottled(payment);
       const refreshed = await pool.query('SELECT status, result_code FROM payments WHERE id = $1', [payment.id]);
       payment = { ...payment, status: refreshed.rows[0]?.status ?? payment.status, result_code: refreshed.rows[0]?.result_code ?? null };
     }

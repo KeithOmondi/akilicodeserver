@@ -224,6 +224,44 @@ const sendReceipt = async (paymentId: string) => {
  */
 const STILL_PROCESSING = 4999;
 
+// ── Gentle polling ───────────────────────────────────────────────────────────
+// The website asks "is it paid yet?" every few seconds and a background job asks too. Safaricom limits how often
+// the status check may be called, and when it refuses, payments can no longer be confirmed. So: one check per
+// payment at a time, at most one every MIN_GAP_MS, and a pause after Safaricom says "too many requests".
+const MIN_GAP_MS = 4000;
+const RATE_LIMIT_PAUSE_MS = 25000;
+const lastCheck = new Map<string, number>();
+const lastErrorLog = new Map<string, number>();
+let pausedUntil = 0;
+
+const forgetOld = (m: Map<string, number>) => {
+  if (m.size < 500) return;
+  const cutoff = Date.now() - 10 * 60 * 1000;
+  for (const [k, t] of m) if (t < cutoff) m.delete(k);
+};
+
+/** True when the failure looks like Safaricom limiting us (HTTP 429, or its "spike arrest" error codes). */
+const isRateLimit = (err: any): boolean => {
+  const status = err?.response?.status;
+  const code = String(err?.response?.data?.errorCode ?? '');
+  return status === 429 || code === '500.003.02' || code === '500.003.03' || /spike|quota|too many/i.test(String(err?.response?.data?.errorMessage ?? ''));
+};
+
+/**
+ * Same as verifyAndApplyStk, but safe to call from polling (the website, the background job): it never calls
+ * Safaricom for the same payment twice within MIN_GAP_MS, and not at all during a rate-limit pause.
+ * Returns 'pending' when it chose not to ask, which just means "check again shortly".
+ */
+export const verifyAndApplyStkThrottled = async (payment: PaymentRow): Promise<PaymentOutcome> => {
+  const now = Date.now();
+  if (now < pausedUntil) return 'pending';
+  const last = lastCheck.get(payment.id);
+  if (last && now - last < MIN_GAP_MS) return 'pending';
+  lastCheck.set(payment.id, now);
+  forgetOld(lastCheck);
+  return verifyAndApplyStk(payment);
+};
+
 export const verifyAndApplyStk = async (
   payment: PaymentRow,
   callbackItems?: CallbackItems
@@ -237,7 +275,16 @@ export const verifyAndApplyStk = async (
     // Safaricom: still processing, or temporarily unreachable. Never guess.
     // Logged so a payment that never settles can be diagnosed from the server log (no secrets in this line).
     const d = err?.response?.data;
-    console.warn(`[stk-query] ${payment.checkout_request_id}: HTTP ${err?.response?.status ?? 'none'} ${d?.errorCode ?? ''} ${d?.errorMessage ?? err?.message ?? ''}`.trim());
+    const reason = `HTTP ${err?.response?.status ?? 'none'} ${d?.errorCode ?? ''} ${d?.errorMessage ?? err?.message ?? ''}`.trim();
+    console.warn(`[stk-query] ${payment.checkout_request_id}: ${reason}`);
+    if (isRateLimit(err)) pausedUntil = Date.now() + RATE_LIMIT_PAUSE_MS;
+    // Also keep it in the payment log (at most one entry per payment every 30 s), so the reason can be read later.
+    const lastLogged = lastErrorLog.get(payment.id);
+    if (!lastLogged || Date.now() - lastLogged > 30000) {
+      lastErrorLog.set(payment.id, Date.now());
+      forgetOld(lastErrorLog);
+      await logPaymentEvent({ source: 'stk_query', outcome: `error ${err?.response?.status ?? 'none'}`, checkoutRequestId: payment.checkout_request_id, payload: { reason, status: err?.response?.status ?? null, error: d ?? String(err?.message ?? err) } }).catch(() => undefined);
+    }
     if (await hasTimedOut(payment.id)) {
       await markFailed(payment.id, null, 'No confirmation from Safaricom within 10 minutes', 'expired');
       return 'expired';
@@ -299,7 +346,9 @@ export const reconcilePendingPayments = async () => {
   try {
     ({ rows } = await pool.query(
     `SELECT * FROM payments
-      WHERE (status = 'pending' OR (status = 'failed' AND created_at > now() - interval '30 minutes'))
+      WHERE (status = 'pending'
+             OR (status = 'failed' AND created_at > now() - interval '30 minutes')
+             OR (status = 'expired' AND created_at > now() - interval '6 hours'))
         AND source = 'stk' AND checkout_request_id IS NOT NULL
         AND created_at < now() - interval '45 seconds'
         AND created_at > now() - interval '2 days'
@@ -315,7 +364,7 @@ export const reconcilePendingPayments = async () => {
     throw err;
   }
   for (const p of rows) {
-    await verifyAndApplyStk(p).catch((e) => console.error('reconcile failed:', p.id, e.message));
+    await verifyAndApplyStkThrottled(p).catch((e) => console.error('reconcile failed:', p.id, e.message));
   }
   return rows.length;
 };

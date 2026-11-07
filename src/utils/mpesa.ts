@@ -14,17 +14,52 @@ export const withSecret = (base: string) => `${base}/${env.MPESA_CALLBACK_SECRET
 
 // ─── GET OAUTH TOKEN ─────────────────────────────────────────────────────────
 
+let cachedToken: { token: string; expiresAt: number } | null = null;
+let tokenRequest: Promise<string> | null = null;
+
+/** Forget the saved token (used when Safaricom says it is no longer valid). */
+export const clearMpesaToken = () => {
+  cachedToken = null;
+};
+
+/**
+ * One access token lasts about an hour. It is kept (and refreshed 5 minutes early), and people who need it at the
+ * same moment share ONE request. Asking for a new token for every payment check doubled the calls to Safaricom and
+ * got us rate-limited, after which payments could no longer be confirmed.
+ */
 export const getMpesaToken = async (): Promise<string> => {
-  const credentials = Buffer.from(
-    `${env.MPESA_CONSUMER_KEY}:${env.MPESA_CONSUMER_SECRET}`
-  ).toString('base64');
+  if (cachedToken && Date.now() < cachedToken.expiresAt) return cachedToken.token;
+  if (tokenRequest) return tokenRequest;
 
-  const response = await axios.get(
-    `${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`,
-    { headers: { Authorization: `Basic ${credentials}` }, timeout: HTTP_TIMEOUT_MS }
-  );
+  tokenRequest = (async () => {
+    try {
+      const credentials = Buffer.from(`${env.MPESA_CONSUMER_KEY}:${env.MPESA_CONSUMER_SECRET}`).toString('base64');
+      const response = await axios.get(`${BASE_URL}/oauth/v1/generate?grant_type=client_credentials`, {
+        headers: { Authorization: `Basic ${credentials}` },
+        timeout: HTTP_TIMEOUT_MS,
+      });
+      const token = response.data.access_token as string;
+      const lifetime = Number(response.data.expires_in) || 3599;
+      cachedToken = { token, expiresAt: Date.now() + Math.max(60, lifetime - 300) * 1000 };
+      return token;
+    } finally {
+      tokenRequest = null;
+    }
+  })();
+  return tokenRequest;
+};
 
-  return response.data.access_token;
+/** Run a Safaricom call with the saved token; if Safaricom rejects the token (401), get a fresh one and try once more. */
+const withToken = async <T>(call: (token: string) => Promise<T>): Promise<T> => {
+  try {
+    return await call(await getMpesaToken());
+  } catch (err: any) {
+    if (err?.response?.status === 401) {
+      clearMpesaToken();
+      return call(await getMpesaToken());
+    }
+    throw err;
+  }
 };
 
 // ─── GENERATE PASSWORD ───────────────────────────────────────────────────────
@@ -53,10 +88,9 @@ export const initiateStkPush = async (
   const formattedPhone = normalizeKenyanPhone(phone);
   if (!formattedPhone) throw new Error('Invalid Kenyan phone number');
 
-  const token = await getMpesaToken();
   const { password, timestamp } = generatePassword();
 
-  const response = await axios.post(
+  const response = await withToken((token) => axios.post(
     `${BASE_URL}/mpesa/stkpush/v1/processrequest`,
     {
       BusinessShortCode: env.MPESA_SHORTCODE,
@@ -72,7 +106,7 @@ export const initiateStkPush = async (
       TransactionDesc: description.slice(0, 13),
     },
     { headers: { Authorization: `Bearer ${token}` }, timeout: HTTP_TIMEOUT_MS }
-  );
+  ));
 
   return response.data;
 };
@@ -81,10 +115,9 @@ export const initiateStkPush = async (
 // Throws if Safaricom says the request is still being processed (HTTP 500).
 
 export const querySTKStatus = async (checkoutRequestId: string) => {
-  const token = await getMpesaToken();
   const { password, timestamp } = generatePassword();
 
-  const response = await axios.post(
+  const response = await withToken((token) => axios.post(
     `${BASE_URL}/mpesa/stkpushquery/v1/query`,
     {
       BusinessShortCode: env.MPESA_SHORTCODE,
@@ -93,7 +126,7 @@ export const querySTKStatus = async (checkoutRequestId: string) => {
       CheckoutRequestID: checkoutRequestId,
     },
     { headers: { Authorization: `Bearer ${token}` }, timeout: HTTP_TIMEOUT_MS }
-  );
+  ));
 
   return response.data;
 };
