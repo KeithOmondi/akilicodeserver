@@ -233,8 +233,11 @@ export const verifyAndApplyStk = async (
   let result: any;
   try {
     result = await querySTKStatus(payment.checkout_request_id);
-  } catch {
+  } catch (err: any) {
     // Safaricom: still processing, or temporarily unreachable. Never guess.
+    // Logged so a payment that never settles can be diagnosed from the server log (no secrets in this line).
+    const d = err?.response?.data;
+    console.warn(`[stk-query] ${payment.checkout_request_id}: HTTP ${err?.response?.status ?? 'none'} ${d?.errorCode ?? ''} ${d?.errorMessage ?? err?.message ?? ''}`.trim());
     if (await hasTimedOut(payment.id)) {
       await markFailed(payment.id, null, 'No confirmation from Safaricom within 10 minutes', 'expired');
       return 'expired';
