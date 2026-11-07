@@ -5,6 +5,7 @@
  *   node scripts/seed-course.js --branch --apply         write to the branch
  *   node scripts/seed-course.js --main --apply           write to the real database (on purpose)
  *   add  --content programming                          which file in server/content/ (default: programming)
+ *   add  --create-course --price 1500                    create the course too if it does not exist (you choose the price, KES)
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../.env') });
 const path = require('path');
@@ -22,9 +23,11 @@ const { seedCourse } = require('./lib/seed-course');
   const client = new Client({ connectionString: url, ssl: /neon\.tech|sslmode=/.test(url) ? { rejectUnauthorized: true } : false });
   await client.connect();
   try {
-    const r = await seedCourse(client, content, { apply });
+    const p = process.argv.indexOf('--price');
+    const r = await seedCourse(client, content, { apply, createCourse: process.argv.includes('--create-course'), price: p > -1 ? process.argv[p + 1] : undefined });
     if (!r.ok) { console.error('Not done:\n - ' + r.problems.join('\n - ')); process.exitCode = 1; return; }
     if (r.skipped) { console.log(r.message); return; }
+    if (r.createdCourse) console.log(`${apply ? 'Created' : 'Would create'} the course "${r.course}".`);
     console.log(`${apply ? 'Added' : 'Would add'} to "${r.course}": module "${r.module}", ${r.lessons} lessons, ${r.questions} questions, ${r.lessons} assignments.`);
     if (!apply) console.log('Preview only. Add --apply to write it.');
   } finally {

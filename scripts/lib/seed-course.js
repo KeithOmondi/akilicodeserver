@@ -9,6 +9,7 @@ const TYPES = ['notes', 'coding', 'scratch'];
 const check = (content) => {
   const problems = [];
   const badGroups = (g) => g !== undefined && g !== null && (!Array.isArray(g) || g.some((x) => !GROUPS.includes(x)));
+  if (badGroups(content.course?.ageGroups)) problems.push('course.ageGroups must be a list from: ' + GROUPS.join(', '));
   if (badGroups(content.module?.ageGroups)) problems.push('module.ageGroups must be a list from: ' + GROUPS.join(', '));
   if (content.module?.lessonType && !TYPES.includes(content.module.lessonType)) problems.push('module.lessonType must be one of: ' + TYPES.join(', '));
   if (!content.courseTitle || !content.module?.title) problems.push('courseTitle and module.title are required');
@@ -27,26 +28,41 @@ const check = (content) => {
   return problems;
 };
 
-/** client: a pg Client or Pool client. Returns a summary. */
-const seedCourse = async (client, content, { apply = false } = {}) => {
+/**
+ * client: a pg Client or Pool client. Returns a summary.
+ * options.createCourse + options.price: if the course does not exist, create it (the price is always YOUR choice).
+ */
+const seedCourse = async (client, content, { apply = false, createCourse = false, price } = {}) => {
   const problems = check(content);
   if (problems.length) return { ok: false, problems };
 
   const course = await client.query('SELECT id, title FROM courses WHERE lower(title) = lower($1)', [content.courseTitle]);
-  if (course.rows.length === 0) {
-    return { ok: false, problems: [`No course called "${content.courseTitle}". Create it in Admin > Courses first (you choose its price), then run this again.`] };
-  }
   if (course.rows.length > 1) {
     return { ok: false, problems: [`More than one course is called "${content.courseTitle}". Rename one so this is unambiguous.`] };
   }
-  const courseId = course.rows[0].id;
 
-  const existing = await client.query('SELECT id FROM modules WHERE course_id = $1 AND lower(title) = lower($2)', [courseId, content.module.title]);
-  if (existing.rows.length > 0) return { ok: true, skipped: true, message: `The module "${content.module.title}" already exists in "${course.rows[0].title}". Nothing changed.` };
+  let courseId = null;
+  let courseTitle = content.courseTitle;
+  const willCreate = course.rows.length === 0;
+  if (willCreate) {
+    if (!createCourse) {
+      return { ok: false, problems: [`No course called "${content.courseTitle}". Create it in Admin > Courses first (you choose its price), or add --create-course --price <KES> to let this script create it.`] };
+    }
+    const p = Number(price);
+    if (price === undefined || price === '' || !Number.isFinite(p) || p < 0) {
+      return { ok: false, problems: ['--create-course needs --price <amount in KES>, for example --price 1500. The price is your decision, so there is no default.'] };
+    }
+  } else {
+    courseId = course.rows[0].id;
+    courseTitle = course.rows[0].title;
+    const existing = await client.query('SELECT id FROM modules WHERE course_id = $1 AND lower(title) = lower($2)', [courseId, content.module.title]);
+    if (existing.rows.length > 0) return { ok: true, skipped: true, message: `The module "${content.module.title}" already exists in "${courseTitle}". Nothing changed.` };
+  }
 
   const summary = {
     ok: true,
-    course: course.rows[0].title,
+    course: courseTitle,
+    createdCourse: willCreate,
     module: content.module.title,
     lessons: content.lessons.length,
     questions: content.lessons.reduce((n, l) => n + l.questions.length, 0),
@@ -56,6 +72,15 @@ const seedCourse = async (client, content, { apply = false } = {}) => {
 
   await client.query('BEGIN');
   try {
+    if (willCreate) {
+      const c = content.course || {};
+      const made = await client.query(
+        `INSERT INTO courses (title, description, price, duration, category, age_groups, path_order)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [content.courseTitle, c.description ?? null, Number(price), c.duration ?? null, c.category ?? null, c.ageGroups?.length ? c.ageGroups : null, c.pathOrder ?? 0]
+      );
+      courseId = made.rows[0].id;
+    }
     const { rows: [{ max }] } = await client.query('SELECT COALESCE(MAX(order_index), -1) AS max FROM modules WHERE course_id = $1', [courseId]);
     const mod = await client.query(
       'INSERT INTO modules (course_id, title, description, order_index) VALUES ($1,$2,$3,$4) RETURNING id',

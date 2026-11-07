@@ -7,7 +7,15 @@
  *   node scripts/seed-course.js --branch --content scratch-explorers --apply    (write)
  */
 module.exports = {
-  courseTitle: 'Programming',
+  courseTitle: 'Scratch Adventures',
+  /** Used only when the course has to be created (price comes from the command line). */
+  course: {
+    description: 'Learn to code by snapping colourful blocks together. Make a cat move, talk, dance and play games. A friendly first step for young learners, before typing code.',
+    duration: '10 lessons',
+    category: 'Coding & Logic',
+    ageGroups: ['4-6', '7-9', '10-12'],
+    pathOrder: 1,
+  },
   module: {
     title: 'Block Coding Adventures',
     description: 'Programming with blocks: directions, loops, keys and choices, and a score. Build a small game.',

@@ -104,24 +104,65 @@ test('the block-coding modules are valid, for the right groups, and use the bloc
   }
 });
 
-test('adding all modules in order gives each group only its own lessons, in the right order', async () => {
+test('a course that does not exist is only created when asked, with a price you give, and never twice', async () => {
+  await db.query('DELETE FROM courses');
+  // not asked: nothing created
+  const no = await seedCourse(client(), tots, { apply: true });
+  assert.equal(no.ok, false);
+  assert.match(no.problems[0], /--create-course/);
+  // asked but no price: refused (the price is the owner's decision)
+  const noPrice = await seedCourse(client(), tots, { apply: true, createCourse: true });
+  assert.equal(noPrice.ok, false);
+  assert.match(noPrice.problems[0], /--price/);
+  const badPrice = await seedCourse(client(), tots, { apply: true, createCourse: true, price: 'free' });
+  assert.equal(badPrice.ok, false);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM courses')).rows[0].n, 0);
+  // preview creates nothing either
+  const preview = await seedCourse(client(), tots, { createCourse: true, price: '1500' });
+  assert.equal(preview.ok, true);
+  assert.equal(preview.createdCourse, true);
+  assert.equal((await db.query('SELECT count(*)::int AS n FROM courses')).rows[0].n, 0);
+  // apply: the course is created with its groups, place in the path and the price given
+  const made = await seedCourse(client(), tots, { apply: true, createCourse: true, price: '1500' });
+  assert.equal(made.applied, true);
+  const row = (await db.query("SELECT price, age_groups, path_order, is_active FROM courses WHERE title='Scratch Adventures'")).rows[0];
+  assert.equal(Number(row.price), 1500);
+  assert.deepEqual(row.age_groups, ['4-6', '7-9', '10-12']);
+  assert.equal(row.path_order, 1);
+  assert.equal(row.is_active, true);
+  // the second module goes into the SAME course, no duplicate course
+  const second = await seedCourse(client(), explorers, { apply: true, createCourse: true, price: '1500' });
+  assert.equal(second.applied, true);
+  assert.equal(second.createdCourse, false);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM courses WHERE title='Scratch Adventures'")).rows[0].n, 1);
+});
+
+test('each age group sees only its own modules in each course, in the right order', async () => {
   await db.query('DELETE FROM courses');
   await db.query("INSERT INTO courses (title, description, price) VALUES ('Programming','x',100)");
-  for (const c of [content, tots, explorers, web]) assert.equal((await seedCourse(client(), c, { apply: true })).applied, true);
+  for (const c of [content, web]) assert.equal((await seedCourse(client(), c, { apply: true })).applied, true);
+  for (const c of [tots, explorers]) assert.equal((await seedCourse(client(), c, { apply: true, createCourse: true, price: '1500' })).applied, true);
 
   const parent = (await db.query("INSERT INTO users (name,email,phone,password,is_verified) VALUES ('P','order@x.co','0799000111','x',true) RETURNING id")).rows[0].id;
-  const course = (await db.query("SELECT id FROM courses WHERE title='Programming'")).rows[0].id;
-  const seen = async (group: string) => {
+  const seen = async (group: string, course: string) => {
     const k = (await db.query("INSERT INTO kids (parent_id,name,age,age_group) VALUES ($1,'K',9,$2) RETURNING id", [parent, group])).rows[0].id;
     const { rows } = await db.query(
-      `SELECT m.title AS module, l.lesson_type FROM modules m JOIN lessons l ON l.module_id = m.id
-        WHERE m.course_id = $1 AND (l.age_groups IS NULL OR (SELECT age_group FROM kids WHERE id = $2) = ANY(l.age_groups))
+      `SELECT m.title AS module, l.lesson_type FROM modules m JOIN lessons l ON l.module_id = m.id JOIN courses c ON c.id = m.course_id
+        WHERE c.title = $1 AND (l.age_groups IS NULL OR (SELECT age_group FROM kids WHERE id = $2) = ANY(l.age_groups))
         GROUP BY m.id, m.title, m.order_index, l.lesson_type ORDER BY m.order_index`, [course, k]);
     return rows.map((r: any) => r.module + ' [' + r.lesson_type + ']');
   };
-  assert.deepEqual(await seen('4-6'), ['Programming for Everyone [notes]', 'Little Coders: Move the Cat [scratch]']);
-  assert.deepEqual(await seen('7-9'), ['Programming for Everyone [notes]', 'Block Coding Adventures [scratch]']);
-  assert.deepEqual(await seen('10-12'), ['Programming for Everyone [notes]', 'Block Coding Adventures [scratch]', 'Build Your First Web Page [coding]']);
-  assert.deepEqual(await seen('13-15'), ['Programming for Everyone [notes]', 'Build Your First Web Page [coding]']);
-  assert.deepEqual(await seen('16-18'), ['Programming for Everyone [notes]', 'Build Your First Web Page [coding]']);
+  const tot = 'Little Coders: Move the Cat [scratch]';
+  const block = 'Block Coding Adventures [scratch]';
+  const intro = 'Programming for Everyone [notes]';
+  const webm = 'Build Your First Web Page [coding]';
+  assert.deepEqual(await seen('4-6', 'Scratch Adventures'), [tot]);
+  assert.deepEqual(await seen('7-9', 'Scratch Adventures'), [block]);
+  assert.deepEqual(await seen('10-12', 'Scratch Adventures'), [block]);
+  assert.deepEqual(await seen('13-15', 'Scratch Adventures'), []);
+  assert.deepEqual(await seen('16-18', 'Scratch Adventures'), []);
+  assert.deepEqual(await seen('4-6', 'Programming'), [intro]);
+  assert.deepEqual(await seen('10-12', 'Programming'), [intro, webm]);
+  assert.deepEqual(await seen('13-15', 'Programming'), [intro, webm]);
+  assert.deepEqual(await seen('16-18', 'Programming'), [intro, webm]);
 });
