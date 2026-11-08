@@ -24,6 +24,30 @@ const ownProject = async (id: string, kid: string) => {
 
 // ── Child ────────────────────────────────────────────────────────────────────
 
+/**
+ * GET /kid/projects/kinds: which kinds of project the child should be offered, following what their parent
+ * enrolled them in. A block-coding lesson means blocks, a web-coding lesson means web pages. If the courses say
+ * nothing (no enrollment, or only reading lessons), both are offered so the child is never left with nothing.
+ */
+export const listProjectKinds = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT DISTINCT l.lesson_type
+         FROM enrollments e
+         JOIN modules m ON m.course_id = e.course_id
+         JOIN lessons l ON l.module_id = m.id
+        WHERE e.kid_id = $1 AND e.status = 'active' AND ${trialStillValid('e')}
+          AND l.lesson_type IN ('scratch', 'coding') AND ${lessonVisibleSql('l', 1)}`,
+      [kidId(req)]
+    );
+    const types = rows.map((r: { lesson_type: string }) => r.lesson_type);
+    const kinds = [types.includes('scratch') ? 'blocks' : null, types.includes('coding') ? 'web' : null].filter(Boolean);
+    res.status(200).json({ status: 'success', data: { kinds: kinds.length ? kinds : ['blocks', 'web'] } });
+  } catch (e) {
+    next(e);
+  }
+};
+
 /** GET /kid/projects/assignments: every assignment in the child's active courses, with the state of their project. */
 export const listAssignments = async (req: Request, res: Response, next: NextFunction) => {
   try {

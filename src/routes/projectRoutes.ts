@@ -9,6 +9,7 @@ import * as V from '../validators/project.validators';
 export const kidProjectRoutes = Router();
 kidProjectRoutes.use(isAuthenticated, isAuthorized('kid'));
 
+kidProjectRoutes.get('/kinds', P.listProjectKinds);
 kidProjectRoutes.get('/assignments', P.listAssignments);
 kidProjectRoutes.get('/', P.listProjects);
 kidProjectRoutes.post('/', enforceScreenTime, validate(V.createProjectSchema), P.createProject);

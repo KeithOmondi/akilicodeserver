@@ -167,3 +167,15 @@ test('block projects may carry small painted pictures, but only real image data 
   assert.equal(ok('data:image/svg+xml;base64,PHN2Zz4='), false); // svg can carry scripts: not allowed
   assert.equal(V.saveProjectSchema.safeParse({ blocks: sprite('data:image/png;base64,' + 'A'.repeat(1_600_000)) }).success, false);
 });
+
+test('the Make page offers only what the enrolled course teaches (blocks, web, or both when unclear)', async () => {
+  const w = await world(); // its lessons are plain notes: no signal, so both
+  assert.deepEqual((await call(P.listProjectKinds, asKid(w.kid))).body.data.kinds, ['blocks', 'web']);
+  await db.query(`UPDATE lessons SET lesson_type='scratch' WHERE id=$1`, [w.withA]);
+  assert.deepEqual((await call(P.listProjectKinds, asKid(w.kid))).body.data.kinds, ['blocks']);
+  await db.query(`UPDATE lessons SET lesson_type='coding' WHERE id=$1`, [w.noA]);
+  assert.deepEqual((await call(P.listProjectKinds, asKid(w.kid))).body.data.kinds, ['blocks', 'web']);
+  await db.query(`UPDATE lessons SET lesson_type='notes' WHERE id=$1`, [w.withA]);
+  assert.deepEqual((await call(P.listProjectKinds, asKid(w.kid))).body.data.kinds, ['web']);
+  assert.deepEqual((await call(P.listProjectKinds, asKid(w.other))).body.data.kinds, ['blocks', 'web']); // not enrolled
+});
