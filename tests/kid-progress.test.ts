@@ -54,6 +54,17 @@ test('a parent sees level, courses, recent lessons, projects, badges and screen 
   assert.equal(d.courses.length, 1);
   assert.deepEqual([d.courses[0].total_lessons, d.courses[0].completed_lessons, d.courses[0].progress, d.courses[0].next_lesson, d.courses[0].learning_now], [3, 2, 67, 'Three', true]);
   assert.equal(d.recent.length, 2);
+  // lesson by lesson, billing, time spent, week comparison, account
+  const mods = d.courses[0].modules;
+  assert.equal(mods.length, 1);
+  assert.deepEqual(mods[0].lessons.map((x: any) => [x.title, x.done]), [['One', true], ['Two', true], ['Three', false]]);
+  assert.equal(Number(d.courses[0].fee_amount), 100);
+  assert.equal(d.courses[0].billing_cycle, 'monthly');
+  assert.equal(d.totals.lessons_this_week, 2);
+  assert.equal(d.totals.lessons_last_week, 0);
+  assert.deepEqual(d.time_spent, { total_seconds: 0, last_30_days_seconds: 0, learning_days: 0 });
+  assert.equal(d.kid.consent_ok, false); // this test child has no consent record
+  assert.equal(d.kid.has_pin, false);
   assert.ok(d.projects.find((p: any) => p.title === 'Dance').feedback === 'Nice work!');
   assert.equal(d.projects.find((p: any) => 'html' in p || 'js' in p), undefined, 'the child\'s code is not sent');
   assert.deepEqual(d.badges.filter((x: any) => x.earned).map((x: any) => x.name), ['First Step']);

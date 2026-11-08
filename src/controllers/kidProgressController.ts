@@ -3,6 +3,7 @@ import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { lessonVisibleSql } from '../utils/ageGroups';
 import { trialStillValid } from '../utils/trial';
+import { CONSENT_VERSION } from '../services/consent';
 import { getScreenTimeStatus, getWeeklyUsage } from '../services/screenTime';
 
 const POINTS_PER_LEVEL = 100;
@@ -39,7 +40,8 @@ export const getKidProgress = async (req: Request, res: Response, next: NextFunc
     const kidRes = await pool.query(
       `SELECT id, name, age, age_group, grade, avatar, COALESCE(total_points, 0) AS total_points,
               COALESCE(streak_days, 0) AS streak_days, last_activity_date::text AS last_activity_date,
-              last_kid_login_at, leaderboard_opt_in, created_at, screen_time_daily_minutes
+              last_kid_login_at, leaderboard_opt_in, created_at, screen_time_daily_minutes,
+              username, (pin_hash IS NOT NULL) AS has_pin, COALESCE(break_every_minutes, 30) AS break_every_minutes
          FROM kids WHERE id = $1 AND parent_id = $2`,
       [kidId, parentId]
     );
@@ -51,7 +53,9 @@ export const getKidProgress = async (req: Request, res: Response, next: NextFunc
 
     const courses = (
       await pool.query(
-        `SELECT e.id AS enrollment_id, e.course_name, e.status, e.payment_status, e.trial_ends_at,
+        `SELECT e.id AS enrollment_id, e.course_id, e.course_name, e.status, e.payment_status, e.trial_ends_at,
+                e.fee_amount, e.billing_cycle, e.next_payment_date::text AS next_payment_date, e.total_paid,
+                e.last_payment_date, e.start_date::text AS start_date, e.pay_ref,
                 (e.status = 'active' AND ${trialStillValid('e')}) AS learning_now,
                 (SELECT COUNT(*)::int FROM lessons l JOIN modules m ON m.id = l.module_id
                   WHERE m.course_id = e.course_id AND ${lessonVisibleSql('l', 1)}) AS total_lessons,
@@ -134,10 +138,63 @@ export const getKidProgress = async (req: Request, res: Response, next: NextFunc
       )
     ).rows;
 
+    // Lesson by lesson, for every course the child is enrolled in (only lessons their age group sees).
+    const outline = (
+      await pool.query(
+        `SELECT m.course_id, m.id AS module_id, m.title AS module, m.order_index AS module_order,
+                l.id AS lesson_id, l.title AS lesson, l.lesson_type, (l.assignment IS NOT NULL AND l.assignment <> '') AS has_assignment,
+                l.order_index AS lesson_order, kp.completed AS done, kp.completed_at, kp.points_earned
+           FROM modules m
+           JOIN lessons l ON l.module_id = m.id AND ${lessonVisibleSql('l', 1)}
+           LEFT JOIN kid_progress kp ON kp.lesson_id = l.id AND kp.kid_id = $1 AND kp.completed = true
+          WHERE m.course_id IN (SELECT course_id FROM enrollments WHERE kid_id = $1 AND parent_id = $2 AND course_id IS NOT NULL)
+          ORDER BY m.order_index, l.order_index`,
+        [kidId, parentId]
+      )
+    ).rows;
+    const bestQuiz = await optional(
+      async () =>
+        (await pool.query(`SELECT lesson_id, MAX(score) AS score, MAX(total) AS total FROM quiz_submissions WHERE student_id = $1 GROUP BY lesson_id`, [kidId])).rows,
+      [] as { lesson_id: string; score: number; total: number }[]
+    );
+    const quizOf = new Map(bestQuiz.map((q) => [q.lesson_id, q]));
+    const outlineByCourse: Record<string, { module: string; lessons: object[] }[]> = {};
+    for (const r of outline) {
+      const mods = (outlineByCourse[r.course_id] ??= []);
+      let mod = mods.find((m) => (m as { id?: string }).id === r.module_id) as ({ id?: string; module: string; lessons: object[] }) | undefined;
+      if (!mod) { mod = { id: r.module_id, module: r.module, lessons: [] }; mods.push(mod); }
+      const q = quizOf.get(r.lesson_id);
+      mod.lessons.push({
+        title: r.lesson, type: r.lesson_type, has_assignment: r.has_assignment, done: !!r.done, completed_at: r.completed_at, points: r.done ? r.points_earned : 0,
+        quiz: q ? { score: Number(q.score), total: Number(q.total) } : null,
+      });
+    }
+    const coursesWithOutline = courses.map((c) => ({ ...c, modules: outlineByCourse[c.course_id as string] ?? [] }));
+
+    const usage = (
+      await pool.query(
+        `SELECT COALESCE(SUM(seconds), 0)::int AS total, COALESCE(SUM(seconds) FILTER (WHERE day > (now() AT TIME ZONE 'Africa/Nairobi')::date - 30), 0)::int AS last30,
+                COUNT(*) FILTER (WHERE seconds > 0)::int AS days
+           FROM kid_usage_daily WHERE kid_id = $1`,
+        [kidId]
+      )
+    ).rows[0];
+    const consent = await optional(
+      async () => (await pool.query('SELECT policy_version FROM parental_consents WHERE kid_id = $1 AND withdrawn_at IS NULL ORDER BY accepted_at DESC LIMIT 1', [kidId])).rows[0] as { policy_version: string } | undefined,
+      undefined
+    );
+    const weeks = (
+      await pool.query(
+        `SELECT COUNT(*) FILTER (WHERE completed_at > now() - interval '7 days')::int AS this_week,
+                COUNT(*) FILTER (WHERE completed_at <= now() - interval '7 days' AND completed_at > now() - interval '14 days')::int AS last_week
+           FROM kid_progress WHERE kid_id = $1 AND completed = true`,
+        [kidId]
+      )
+    ).rows[0];
+
     const marked = [...projects, ...handIns].filter((x) => x.marks !== null && x.marks !== undefined);
     const quizPct = quizzes.filter((q) => q.total > 0).map((q) => (q.score / q.total) * 100);
     const avg = (a: number[]) => (a.length ? Math.round(a.reduce((s, n) => s + n, 0) / a.length) : null);
-    const weekAgo = Date.now() - 7 * 86400000;
 
     res.status(200).json({
       status: 'success',
@@ -146,20 +203,24 @@ export const getKidProgress = async (req: Request, res: Response, next: NextFunc
           id: kid.id, name: kid.name, age: kid.age, age_group: kid.age_group, grade: kid.grade, avatar: kid.avatar,
           joined: kid.created_at, last_login: kid.last_kid_login_at, last_activity_date: kid.last_activity_date,
           leaderboard_opt_in: !!kid.leaderboard_opt_in,
+          username: kid.username ?? null, has_pin: !!kid.has_pin,
+          consent_ok: consent?.policy_version === CONSENT_VERSION,
         },
+        time_spent: { total_seconds: usage.total, last_30_days_seconds: usage.last30, learning_days: usage.days },
         level: {
           level, points, points_in_level: points % POINTS_PER_LEVEL, points_per_level: POINTS_PER_LEVEL,
           points_to_next: level * POINTS_PER_LEVEL - points, streak_days: Number(kid.streak_days),
         },
         totals: {
           lessons_completed: completedTotal,
-          lessons_this_week: recent.filter((r) => r.completed_at && new Date(r.completed_at).getTime() > weekAgo).length,
+          lessons_this_week: weeks.this_week,
+          lessons_last_week: weeks.last_week,
           projects_made: projects.length,
           projects_handed_in: projects.filter((p) => p.submitted_at).length + handIns.length,
           average_mark: avg(marked.map((m) => Number(m.marks))),
           average_quiz_percent: avg(quizPct),
         },
-        courses,
+        courses: coursesWithOutline,
         recent,
         quizzes,
         projects,
