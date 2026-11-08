@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { lessonVisibleSql } from '../utils/ageGroups';
+import { trialStillValid } from '../utils/trial';
 
 export const getMyCourses = async (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -33,7 +34,7 @@ export const getMyCourses = async (req: Request, res: Response, next: NextFuncti
        FROM enrollments e
        LEFT JOIN courses c ON c.id = e.course_id
        WHERE e.kid_id = $1 
-         AND e.status = 'active'
+         AND e.status = 'active' AND ${trialStillValid('e')}
        ORDER BY e.created_at DESC`,
       [kidId]
     );
@@ -74,7 +75,7 @@ export const getCourseContent = async (req: Request, res: Response, next: NextFu
     const enrollmentResult = await pool.query(
       `SELECT id, course_id, course_name
        FROM enrollments
-       WHERE id = $1 AND kid_id = $2 AND status = 'active'`,
+       WHERE id = $1 AND kid_id = $2 AND status = 'active' AND ${trialStillValid('')}`,
       [enrollmentId, kidId]
     );
 
@@ -139,7 +140,7 @@ export const getLesson = async (req: Request, res: Response, next: NextFunction)
 
     const enrollmentResult = await pool.query(
       `SELECT id, course_id FROM enrollments
-       WHERE id = $1 AND kid_id = $2 AND status = 'active'`,
+       WHERE id = $1 AND kid_id = $2 AND status = 'active' AND ${trialStillValid('')}`,
       [enrollmentId, kidId]
     );
 
@@ -200,7 +201,7 @@ export const submitLesson = async (req: Request, res: Response, next: NextFuncti
 
     const enrollmentResult = await client.query(
       `SELECT id, course_id FROM enrollments
-       WHERE id = $1 AND kid_id = $2 AND status = 'active'`,
+       WHERE id = $1 AND kid_id = $2 AND status = 'active' AND ${trialStillValid('')}`,
       [enrollmentId, kidId]
     );
 
@@ -305,11 +306,11 @@ export const getDashboardStats = async (req: Request, res: Response, next: NextF
           FROM lessons l
           JOIN modules m ON m.id = l.module_id
           JOIN enrollments e2 ON e2.course_id = m.course_id
-          WHERE e2.kid_id = $1 AND e2.status = 'active' AND ${lessonVisibleSql('l', 1)}
+          WHERE e2.kid_id = $1 AND e2.status = 'active' AND ${trialStillValid('e2')} AND ${lessonVisibleSql('l', 1)}
         ) as total_lessons
        FROM enrollments e
        LEFT JOIN kid_progress kp ON kp.enrollment_id = e.id AND kp.completed = true
-       WHERE e.kid_id = $1 AND e.status = 'active'`,
+       WHERE e.kid_id = $1 AND e.status = 'active' AND ${trialStillValid('e')}`,
       [kidId]
     );
 

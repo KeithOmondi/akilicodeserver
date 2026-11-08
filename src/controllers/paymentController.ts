@@ -111,7 +111,8 @@ export const createPayment = async (req: AuthRequest, res: Response, next: NextF
            last_payment_date = $1,
            next_payment_date = $2,
            mpesa_receipt_number = $3,
-           total_paid = COALESCE(total_paid, 0) + $4
+           total_paid = COALESCE(total_paid, 0) + $4,
+           trial_ends_at = NULL
        WHERE id = $5`,
       [paymentDate, nextPaymentDate, receipt_number, amount, enrollment_id]
     );
@@ -299,7 +300,8 @@ export const initiateStkPush = async (req: AuthRequest, res: Response, next: Nex
            last_payment_date = $1,
            next_payment_date = $2,
            mpesa_receipt_number = $3,
-           total_paid = COALESCE(total_paid, 0) + $4
+           total_paid = COALESCE(total_paid, 0) + $4,
+           trial_ends_at = NULL
        WHERE id = $5`,
       [paymentDate, nextPaymentDate, receipt_number, amount, enrollment_id]
     );

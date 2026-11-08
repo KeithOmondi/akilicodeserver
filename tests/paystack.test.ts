@@ -34,7 +34,7 @@ before(async () => {
   db = new PGlite({ extensions: { uuid_ossp } });
   const root = path.join(__dirname, '..');
   await db.exec(fs.readFileSync(path.join(root, 'schema/schema.sql'), 'utf8').replace(/CREATE EXTENSION IF NOT EXISTS pgcrypto;/, ''));
-  for (const m of ['001_payment_hardening', '002_phase2_accounts', '006_paystack']) await db.exec(fs.readFileSync(path.join(root, `migrations/${m}.sql`), 'utf8'));
+  for (const m of ['001_payment_hardening', '002_phase2_accounts', '006_paystack', '007_free_trial']) await db.exec(fs.readFileSync(path.join(root, `migrations/${m}.sql`), 'utf8'));
 
   const run = async (sql: string, params?: any[]) => {
     const r = await db.query(sql, params);

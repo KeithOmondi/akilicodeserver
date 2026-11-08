@@ -45,7 +45,7 @@ export const getPublicPlans = async (req: Request, res: Response, next: NextFunc
       status: 'success',
       data: {
         plans:      result.rows,
-        trial_days: trial?.trial_duration_days ?? 5,
+        trial_days: trial?.trial_duration_days ?? 7,
         has_trial:  !!trial,
       }
     });

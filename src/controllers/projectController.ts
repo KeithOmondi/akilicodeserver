@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { lessonVisibleSql } from '../utils/ageGroups';
+import { trialStillValid } from '../utils/trial';
 
 const MAX_PROJECTS_PER_KID = 25;
 
@@ -35,7 +36,7 @@ export const listAssignments = async (req: Request, res: Response, next: NextFun
          JOIN modules m  ON m.course_id = e.course_id
          JOIN lessons l  ON l.module_id = m.id
          LEFT JOIN kid_projects p ON p.kid_id = e.kid_id AND p.lesson_id = l.id
-        WHERE e.kid_id = $1 AND e.status = 'active' AND l.assignment IS NOT NULL AND l.assignment <> ''
+        WHERE e.kid_id = $1 AND e.status = 'active' AND ${trialStillValid('e')} AND l.assignment IS NOT NULL AND l.assignment <> ''
           AND ${lessonVisibleSql('l', 1)}
         ORDER BY c.title, m.order_index, l.order_index`,
       [kidId(req)]
@@ -103,7 +104,7 @@ export const openForLesson = async (req: Request, res: Response, next: NextFunct
          FROM enrollments e
          JOIN modules m ON m.course_id = e.course_id
          JOIN lessons l ON l.module_id = m.id
-        WHERE e.kid_id = $1 AND e.status = 'active' AND l.id = $2 AND ${lessonVisibleSql('l', 1)} LIMIT 1`,
+        WHERE e.kid_id = $1 AND e.status = 'active' AND ${trialStillValid('e')} AND l.id = $2 AND ${lessonVisibleSql('l', 1)} LIMIT 1`,
       [kid, lessonId]
     );
     if (lesson.rows.length === 0) return next(new AppError('That assignment is not in one of your courses.', 404));

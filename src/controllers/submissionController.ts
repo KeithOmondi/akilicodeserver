@@ -4,6 +4,7 @@ import { AppError } from '../utils/appError';
 import sendMail from '../utils/sendMail';
 import { IUser } from '../interfaces/user.interface';
 import { IKid } from '../interfaces/kid.interface';
+import { trialStillValid } from '../utils/trial';
 
 
 
@@ -38,7 +39,7 @@ export const submitAssignment = async (req: Request, res: Response, next: NextFu
       `SELECT e.id, e.parent_id, e.course_id, e.course_name, k.name AS kid_name
        FROM enrollments e
        JOIN kids k ON k.id = e.kid_id
-       WHERE e.id = $1 AND e.kid_id = $2 AND e.status = 'active'`,
+       WHERE e.id = $1 AND e.kid_id = $2 AND e.status = 'active' AND ${trialStillValid('e')}`,
       [enrollment_id, kidId]
     );
 

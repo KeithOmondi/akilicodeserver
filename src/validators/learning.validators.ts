@@ -56,7 +56,8 @@ export const submitQuizSchema = z.object({
 
 // ── Trials & enrollments (parent) ────────────────────────────────────────────
 
-export const startTrialSchema = z.object({ kid_id: uuid, course_id: uuid });
+// A free trial belongs to an enrollment the parent already made (unpaid). The child and course come from that enrollment.
+export const startTrialSchema = z.object({ enrollment_id: uuid });
 export const trialParams = z.object({ kid_id: uuid, course_id: uuid });
 export const convertTrialParams = z.object({ trial_id: uuid });
 export const convertTrialSchema = z.object({ enrollment_id: uuid });

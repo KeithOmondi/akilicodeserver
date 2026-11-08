@@ -24,6 +24,7 @@ before(async () => {
   await db.exec(fs.readFileSync(path.join(root, 'schema/schema.sql'), 'utf8').replace(/CREATE EXTENSION IF NOT EXISTS pgcrypto;/, ''));
   await db.exec(fs.readFileSync(path.join(root, 'migrations/004_kid_projects.sql'), 'utf8'));
   await db.exec(fs.readFileSync(path.join(root, 'migrations/005_age_groups_and_blocks.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(root, 'migrations/007_free_trial.sql'), 'utf8'));
   const run = async (sql: string, params?: any[]) => {
     const r = await db.query(sql, params);
     return { rows: r.rows, rowCount: r.affectedRows ?? r.rows.length };

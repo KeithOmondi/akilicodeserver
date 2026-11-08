@@ -25,7 +25,7 @@ before(async () => {
   db = new PGlite({ extensions: { uuid_ossp } });
   const schema = fs.readFileSync(path.join(__dirname, '../schema/schema.sql'), 'utf8').replace(/CREATE EXTENSION IF NOT EXISTS pgcrypto;/, '');
   await db.exec(schema);
-  for (const m of ['004_kid_projects', '005_age_groups_and_blocks']) await db.exec(fs.readFileSync(path.join(__dirname, '../migrations/' + m + '.sql'), 'utf8'));
+  for (const m of ['004_kid_projects', '005_age_groups_and_blocks', '007_free_trial']) await db.exec(fs.readFileSync(path.join(__dirname, '../migrations/' + m + '.sql'), 'utf8'));
 });
 
 test('the Programming content is valid: 5 lessons, 10 questions, every answer points at a real option', () => {

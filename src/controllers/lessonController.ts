@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
+import { trialStillValid } from '../utils/trial';
 
 // ──────────────────────────────────────────────────────────────────
 // MODULES (unchanged – they work fine)
@@ -340,7 +341,7 @@ export const submitQuiz = async (req: Request, res: Response, next: NextFunction
         `SELECT 1 FROM enrollments e
            JOIN modules m ON m.course_id = e.course_id
            JOIN lessons l ON l.module_id = m.id
-          WHERE e.id = $1 AND e.kid_id = $2 AND e.status = 'active' AND l.id = $3`,
+          WHERE e.id = $1 AND e.kid_id = $2 AND e.status = 'active' AND ${trialStillValid('e')} AND l.id = $3`,
         [enrollmentId, kidId, lessonId]
       );
       if (own.rows.length > 0) {

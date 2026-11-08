@@ -130,9 +130,16 @@ const applyEnrollmentPaid = async (client: PoolClient, payment: PaymentRow, rece
             last_payment_date = now(),
             paid_at = now(),
             mpesa_receipt_number = COALESCE($3, mpesa_receipt_number),
-            total_paid = COALESCE(total_paid, 0) + $4
+            total_paid = COALESCE(total_paid, 0) + $4,
+            trial_ends_at = NULL
       WHERE id = $5`,
     [status, billing === 'once-off' ? null : next, receipt, payment.amount, payment.enrollment_id]
+  );
+  // a free trial that is now paid for is "converted"
+  await client.query(
+    `UPDATE trial_access SET status = 'converted', updated_at = now()
+      WHERE status IN ('active','expired') AND kid_id = (SELECT kid_id FROM enrollments WHERE id = $1)`,
+    [payment.enrollment_id]
   );
 };
 

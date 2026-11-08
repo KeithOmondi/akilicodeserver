@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import pool from '../config/db';
 import { AppError } from '../utils/appError';
 import { calculateNextPaymentDate } from '../utils/paymentSchedule';
+import { trialStillValid } from '../utils/trial';
 
 export const enrollKid = async (req: Request, res: Response, next: NextFunction) => {
   const client = await pool.connect();
@@ -143,10 +144,17 @@ export const getMyEnrollments = async (req: Request, res: Response, next: NextFu
         }
       }
 
+      // Free trial: active with an end date = on trial; unpaid with an end date in the past = the trial has ended.
+      const trialEnds = enrollment.trial_ends_at ? new Date(enrollment.trial_ends_at) : null;
+      const onTrial = !!trialEnds && enrollment.status === 'active' && trialEnds.getTime() > Date.now();
+      const trialEnded = !!trialEnds && !onTrial && enrollment.status !== 'cancelled' && enrollment.status !== 'active';
+
       return {
         ...enrollment,
-        next_payment_date: next_payment_date?.toISOString().split('T')[0] ?? null,
-        payment_status,
+        next_payment_date: onTrial ? null : next_payment_date?.toISOString().split('T')[0] ?? null,
+        payment_status: onTrial ? 'trial' : payment_status,
+        trial_days_left: onTrial ? Math.max(1, Math.ceil((trialEnds!.getTime() - Date.now()) / 86400000)) : null,
+        trial_ended: trialEnded,
       };
     });
 
@@ -307,7 +315,7 @@ export const getMyEnrolledCourses = async (req: Request, res: Response, next: Ne
        FROM enrollments e
        LEFT JOIN courses c ON c.id = e.course_id
        WHERE e.kid_id = $1 
-         AND e.status = 'active'
+         AND e.status = 'active' AND ${trialStillValid('e')}
        ORDER BY e.created_at DESC`,
       [kidId]
     );

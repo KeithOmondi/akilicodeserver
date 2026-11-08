@@ -30,6 +30,7 @@ before(async () => {
     .replace(/CREATE EXTENSION IF NOT EXISTS "uuid-ossp";/, 'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
   await db.exec(schema);
   await db.exec(fs.readFileSync(path.join(root, 'migrations/001_payment_hardening.sql'), 'utf8'));
+  await db.exec(fs.readFileSync(path.join(root, 'migrations/007_free_trial.sql'), 'utf8'));
 
   const run = async (sql: string, params?: any[]) => {
     const r = await db.query(sql, params);

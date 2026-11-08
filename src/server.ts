@@ -4,6 +4,8 @@ import pool from './config/db';
 import cron from 'node-cron';
 import { sendPaymentReminders } from './utils/sendPaymentReminders';
 import { reconcilePendingPayments } from './services/paymentService';
+import { expireTrials } from './utils/trial';
+import { assertDatabaseIsMigrated } from './utils/schemaCheck';
 
 process.on('uncaughtException', (err: Error) => {
   console.error('UNCAUGHT EXCEPTION! 💥');
@@ -33,6 +35,15 @@ const startCronJobs = () => {
       console.error('❌ Payment reconcile job failed:', (error as Error).message);
     }
   });
+  // Free trials that ran out go back to "unpaid" (access itself already stops at the exact moment, see utils/trial.ts).
+  cron.schedule('*/10 * * * *', async () => {
+    try {
+      const ended = await expireTrials();
+      if (ended > 0) console.log(`⏳ ${ended} free trial(s) ended`);
+    } catch (error) {
+      console.error('❌ Trial expiry job failed:', (error as Error).message);
+    }
+  });
   console.log('⏰ Cron jobs scheduled');
 };
 
@@ -43,6 +54,7 @@ const startServer = async () => {
     const client = await pool.connect();
     console.log('🐘 Database connection verified');
     client.release();
+    await assertDatabaseIsMigrated();
 
     server = app.listen(env.PORT, () => {
       console.log(`🚀 Server locked and loaded on port ${env.PORT}`);
