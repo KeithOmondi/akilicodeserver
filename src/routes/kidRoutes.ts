@@ -1,6 +1,7 @@
 import express from "express";
 import * as kidController from "../controllers/kidController";
 import * as kidAccount from "../controllers/kidAccountController";
+import { getKidProgress } from "../controllers/kidProgressController";
 import * as kidLearningController from "../controllers/kidLearningController";
 import { getLeaderboard } from "../controllers/leaderboardController";
 import { isAuthenticated, isParent, isKid } from "../middleware/authMiddleware";
@@ -53,6 +54,7 @@ router.post(
 // ─── PARENT PROTECTED ─────────────────────────────────────────────────────────
 router.post("/register", ...parent, validate(registerKidSchema), kidAccount.registerKid);
 router.get("/my-kids", ...parent, kidAccount.listMyKids);
+router.get("/:kidId/progress", ...parent, kidId, getKidProgress);
 router.get("/:kidId", ...parent, kidId, kidController.getKidById);
 router.patch("/:kidId", ...parent, kidId, validate(updateKidSchema), kidController.updateKid);
 router.post("/:kidId/consent", ...parent, kidId, validate(consentForExistingKidSchema), kidAccount.recordConsentForExistingKid);
